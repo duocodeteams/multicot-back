@@ -1,0 +1,26 @@
+### cotizar go assistance
+POST https://sistema.aseguratuviaje.com/webapi18/api/CotizacionSeguroViajero
+Content-Type: application/json
+
+{
+    "PaisDesde": 32,
+    "PaisHasta": 1004,
+    "TipoViaje": 1,
+    "FechaDesde": "2026-08-13",
+    "FechaHasta": "2026-08-20",
+    "Edad1": 22,
+    "Edad2": 0,
+    "Edad3": 0,
+    "Edad4": 0,
+    "Edad5": 0,
+    "Cultura": "es-ES",
+    "Email": "prueba@prueba.com",
+    "WebService": "q7d4NEtvpItbDWMqZQ5cyJxY64cPkdi%2FYgQCjibvKcmu1s7cWVD1YNhRvNmrpoSxsAYE4CtxFFOzQXOAUoHRVA%3D%3D",
+    "SemanaGestacion": 0,
+    "Source": "",
+    "Token": ""
+}
+
+### cotizar go assistance
+GET https://sistema.aseguratuviaje.com/webapi18/api/CotizacionSeguroViajero?token=7aaabef2-acdb-47a9-acfb-a18e646dcf6f&idseguro=0
+

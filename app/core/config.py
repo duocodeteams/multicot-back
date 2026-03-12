@@ -20,7 +20,6 @@ class Settings(BaseSettings):
     cardinal_base_url: str = "https://ev2.bluesoft.com.ar/webservice"
     cardinal_agente_emisor_guid: str = ""
     cardinal_agente_emisor_secreto: str = ""
-    cardinal_default_email: str = "cotizador@cotizador.local"
     # IDs de destino Cardinal (obtener de POST /parametros con parametros=destinos).
     # Origen AR se resuelve por nombre "Argentina" vía /parametros.
     cardinal_destino_nacional_id: int | None = None
@@ -28,6 +27,13 @@ class Settings(BaseSettings):
     cardinal_destino_latinoamerica_id: int | None = None
     cardinal_destino_resto_mundo_id: int | None = None
     cardinal_destino_norteamerica_id: int | None = None
+
+    # Email usado cuando las APIs de cotización lo exigen (Cardinal, GoAssistance, etc.)
+    cotizador_default_email: str = "cotizador@cotizador.local"
+
+    # GoAssistance (ATV - Asegura Tu Viaje)
+    go_assistance_base_url: str = "https://sistema.aseguratuviaje.com/webapi18"
+    go_assistance_webservice: str = ""
 
     model_config = {"env_file": ".env", "extra": "ignore"}
 

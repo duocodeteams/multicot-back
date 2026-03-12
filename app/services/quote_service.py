@@ -3,6 +3,7 @@ import logging
 
 from app.quotations.schemas import QuotePlan, QuoteRequest, QuoteResponse
 from app.services.companies.cardinal import CardinalQuoteProvider
+from app.services.companies.go_assistance import GoAssistanceQuoteProvider
 from app.services.companies.inter_assist import InterAssistQuoteProvider
 from app.services.companies.new_travel import NewTravelQuoteProvider
 from app.services.companies.pax import PaxQuoteProvider
@@ -14,6 +15,7 @@ logger = logging.getLogger(__name__)
 _PROVIDERS = [
     PaxQuoteProvider(),
     CardinalQuoteProvider(),
+    GoAssistanceQuoteProvider(),
     TerrawindQuoteProvider(),
     NewTravelQuoteProvider(),
     InterAssistQuoteProvider(),

@@ -60,7 +60,7 @@ class CardinalQuoteProvider:
             "fechaRegreso": request.return_date.isoformat(),
             "edades": request.ages,
             "tarifaAnual": tarifa_anual,
-            "email": self._settings.cardinal_default_email,
+            "email": self._settings.cotizador_default_email,
             "localeId": 1,
             "prestaciones": "cotizador",
         }
