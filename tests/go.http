@@ -1,4 +1,4 @@
-### cotizar go assistance
+### cotizar go assistance POST
 POST https://sistema.aseguratuviaje.com/webapi18/api/CotizacionSeguroViajero
 Content-Type: application/json
 
@@ -21,6 +21,6 @@ Content-Type: application/json
     "Token": ""
 }
 
-### cotizar go assistance
-GET https://sistema.aseguratuviaje.com/webapi18/api/CotizacionSeguroViajero?token=7aaabef2-acdb-47a9-acfb-a18e646dcf6f&idseguro=0
+### cotizar go assistance GET
+GET https://sistema.aseguratuviaje.com/webapi18/api/CotizacionSeguroViajero?token=a5689caf-a137-40f9-84e4-56347b480f04&idseguro=0
 

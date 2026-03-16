@@ -43,7 +43,7 @@ class QuoteRequest(BaseModel):
     departure_date: date = Field(..., description="Fecha ida")
     return_date: date = Field(..., description="Fecha vuelta")
     ages: list[int] = Field(..., min_length=1, description="Edades de los pasajeros")
-    origin: str = Field(..., description="Origen (ej. AR para Argentina)")
+    origin: str = Field(default="AR", description="Origen (ej. AR para Argentina)")
     destination_id: int = Field(..., description="ID destino: 1=Nacional, 2=Latinoamerica, 3=Europa, 4=Resto del mundo, 5=Norteamerica")
     trip_type: TripType = Field(
         default=TRIP_TYPE_UNICO_VIAJE,

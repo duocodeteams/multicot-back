@@ -35,6 +35,10 @@ class Settings(BaseSettings):
     go_assistance_base_url: str = "https://sistema.aseguratuviaje.com/webapi18"
     go_assistance_webservice: str = ""
 
+    # Pax Assistance
+    pax_base_url: str = "https://www.stg.paxassistance.com"
+    pax_api_key: str = ""
+
     model_config = {"env_file": ".env", "extra": "ignore"}
 
 
