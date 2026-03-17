@@ -39,6 +39,11 @@ class Settings(BaseSettings):
     pax_base_url: str = "https://www.stg.paxassistance.com"
     pax_api_key: str = ""
 
+    # New Travel
+    new_travel_base_url: str = "https://cacao.ilstechnik.com/api/v1"
+    new_travel_user: str = ""
+    new_travel_password: str = ""
+
     model_config = {"env_file": ".env", "extra": "ignore"}
 
 
