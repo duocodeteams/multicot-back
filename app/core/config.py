@@ -44,6 +44,11 @@ class Settings(BaseSettings):
     new_travel_user: str = ""
     new_travel_password: str = ""
 
+    # Terrawind (SETW)
+    terrawind_base_url: str = "https://sandbox.setw.net/emision/api/v2/"
+    terrawind_user: str = ""
+    terrawind_password: str = ""
+
     model_config = {"env_file": ".env", "extra": "ignore"}
 
 

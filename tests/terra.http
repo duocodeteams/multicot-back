@@ -1,0 +1,21 @@
+@base_url = https://sandbox.setw.net/emision/api/v2/
+### get products 
+GET {{base_url}}?action=get_products
+Content-Type: application/json
+Authorization: Basic c2FuZGFyZ3dlYmludDp0M3N0MjV3NTR5dHE=
+
+
+### get product by id
+GET {{base_url}}?action=get_product_id&product_id=10432
+Content-Type: application/json
+Authorization: Basic c2FuZGFyZ3dlYmludDp0M3N0MjV3NTR5dHE=
+
+### get coverages by id
+GET {{base_url}}?action=get_coverages&product_id=10432
+Content-Type: application/json
+Authorization: Basic c2FuZGFyZ3dlYmludDp0M3N0MjV3NTR5dHE=
+
+### cotizar get_voucher_price
+GET {{base_url}}?action=get_voucher_price&product_id=10432&passengers=2&date_from=01/04/2026&date_to=10/04/2026&passengers_ages[0]age=30&passengers_ages[1]age=20
+Content-Type: application/json
+Authorization: Basic c2FuZGFyZ3dlYmludDp0M3N0MjV3NTR5dHE=
