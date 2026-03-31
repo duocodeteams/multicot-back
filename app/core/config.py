@@ -10,6 +10,10 @@ from pydantic_settings import BaseSettings
 class Settings(BaseSettings):
     app_name: str = "Cotizador API"
     environment: str = "development"
+    # Lista separada por comas de orígenes permitidos por CORS.
+    # Ejemplo: "https://mi-frontend.com,https://staging-mi-frontend.com"
+    # Para permitir todos: "*"
+    cors_allow_origins: str = "*"
     # Sobrescribir con DATABASE_URL en .env según el entorno
     database_url: str = "sqlite:///./cotizador.db"
     # JWT - generar clave aleatoria: python -c "import secrets; print(secrets.token_hex(32))"
