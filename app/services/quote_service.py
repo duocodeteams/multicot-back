@@ -8,6 +8,7 @@ from app.services.companies.inter_assist import InterAssistQuoteProvider
 from app.services.companies.new_travel import NewTravelQuoteProvider
 from app.services.companies.pax import PaxQuoteProvider
 from app.services.companies.terrawind import TerrawindQuoteProvider
+from app.services.companies.universal import UniversalQuoteProvider
 
 
 logger = logging.getLogger(__name__)
@@ -19,6 +20,7 @@ _PROVIDERS = [
     TerrawindQuoteProvider(),
     NewTravelQuoteProvider(),
     InterAssistQuoteProvider(),
+    UniversalQuoteProvider(),
 ]
 
 

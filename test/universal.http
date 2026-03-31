@@ -1,0 +1,66 @@
+### Universal Assistance - Cotizacion (LeadCotizadorOper)
+### Fuente: DIS035 - REQ 3354 - Integracion Webservices Generica V03.1
+### Nota: reemplazar variables segun el ambiente/credenciales reales.
+
+@baseUrl = https://siebelqa.universal-assistance.com:8443/siebel/app/eai_anon/esn?SWEExtSource=SecureWebService&SWEExtCmd=Execute
+@username = WSPRUEBAAR
+@password = 1234
+@organizacionEmisora = 1-CVOEAYQ
+@convenio = 1-DEY2E6X
+@paisOrigen = ARGENTINA
+@destino = Europa
+@tipoViaje = Un viaje
+@fechaInicio = 12/05/2026
+@fechaFin = 12/10/2026
+@cantidadPasajeros = 1
+@edad1 = 49
+
+POST {{baseUrl}}
+Content-Type: text/xml;charset=UTF-8
+Accept: text/xml
+SOAPAction: "document/http://siebel.com/CustomUI:LeadCotizadorOper"
+
+<soapenv:Envelope xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/" xmlns:cus="http://siebel.com/CustomUI" xmlns:ual="http://www.siebel.com/xml/UALeadCotizadorReq">
+  <soapenv:Header>
+    <wsse:Security xmlns:wsse="http://schemas.xmlsoap.org/ws/2002/07/secext">
+      <wsse:UsernameToken xmlns:wsu="http://schemas.xmlsoap.org/ws/2002/07/utility">
+        <wsse:Username>{{username}}</wsse:Username>
+        <wsse:Password Type="wsse:PasswordText">{{password}}</wsse:Password>
+      </wsse:UsernameToken>
+    </wsse:Security>
+  </soapenv:Header>
+  <soapenv:Body>
+    <cus:LeadCotizadorOper_Input>
+      <ual:UALeadCotizadorReq>
+        <ual:DatosLeadCotizadorIn>
+          <ual:IdLead></ual:IdLead>
+          <ual:OrganizacionEmisora>{{organizacionEmisora}}</ual:OrganizacionEmisora>
+          <ual:CantCotizaciones></ual:CantCotizaciones>
+          <ual:Convenio>{{convenio}}</ual:Convenio>
+          <ual:Folleto></ual:Folleto>
+          <ual:PaisOrigen>{{paisOrigen}}</ual:PaisOrigen>
+          <ual:Destino>{{destino}}</ual:Destino>
+          <ual:TipoViaje>{{tipoViaje}}</ual:TipoViaje>
+          <ual:FechaInicio>{{fechaInicio}}</ual:FechaInicio>
+          <ual:FechaFin>{{fechaFin}}</ual:FechaFin>
+          <ual:CantidadPasajeros>{{cantidadPasajeros}}</ual:CantidadPasajeros>
+          <ual:PackFamiliar></ual:PackFamiliar>
+          <ual:Edad1>{{edad1}}</ual:Edad1>
+          <ual:Edad2></ual:Edad2>
+          <ual:Edad3></ual:Edad3>
+          <ual:Edad4></ual:Edad4>
+          <ual:Edad5></ual:Edad5>
+          <ual:Edad6></ual:Edad6>
+          <ual:Edad7></ual:Edad7>
+          <ual:Edad8></ual:Edad8>
+          <ual:Edad9></ual:Edad9>
+          <ual:Edad10></ual:Edad10>
+          <ual:ApellidoContacto></ual:ApellidoContacto>
+          <ual:NombreContacto></ual:NombreContacto>
+          <ual:TelefonoContacto></ual:TelefonoContacto>
+          <ual:EmailContacto></ual:EmailContacto>
+        </ual:DatosLeadCotizadorIn>
+      </ual:UALeadCotizadorReq>
+    </cus:LeadCotizadorOper_Input>
+  </soapenv:Body>
+</soapenv:Envelope>

@@ -49,6 +49,28 @@ class Settings(BaseSettings):
     terrawind_user: str = ""
     terrawind_password: str = ""
 
+    # Universal Assistance (Siebel SOAP)
+    universal_soap_url: str = (
+        "https://siebelqa.universal-assistance.com:8443/siebel/app/eai_anon/esn"
+        "?SWEExtSource=SecureWebService&SWEExtCmd=Execute"
+    )
+    universal_username: str = ""
+    universal_password: str = ""
+    universal_organizacion_emisora: str = ""
+    universal_convenio: str = ""
+    universal_folleto: str = ""
+    # Mapeos del orquestador (1-5 + trip_type) a los valores esperados por Universal.
+    # Se dejan vacíos para no asumir catálogos hasta definirlos con listas oficiales.
+    universal_pais_origen_ar: str = "ARGENTINA"
+    universal_destino_nacional: str = "Territorio Nacional"
+    universal_destino_latinoamerica: str = "América del Sur (salvo Vzla)"
+    universal_destino_europa: str = "Europa"
+    universal_destino_resto_mundo: str = "Internacional Mundo"
+    universal_destino_norteamerica: str = "America del norte"
+    universal_tipo_viaje_unico_viaje: str = "Un viaje"
+    universal_tipo_viaje_multiviaje: str = "Varios viajes"
+    universal_tipo_viaje_larga_estadia: str = ""
+
     model_config = {"env_file": ".env", "extra": "ignore"}
 
 
@@ -66,6 +88,34 @@ def get_cardinal_destino_ids(settings: Settings) -> dict[int, int]:
         mapping[4] = settings.cardinal_destino_resto_mundo_id
     if settings.cardinal_destino_norteamerica_id is not None:
         mapping[5] = settings.cardinal_destino_norteamerica_id
+    return mapping
+
+
+def get_universal_destinos(settings: Settings) -> dict[int, str]:
+    """destination_id (1-5) -> Destino SOAP Universal, solo valores configurados."""
+    mapping: dict[int, str] = {}
+    if settings.universal_destino_nacional:
+        mapping[1] = settings.universal_destino_nacional
+    if settings.universal_destino_latinoamerica:
+        mapping[2] = settings.universal_destino_latinoamerica
+    if settings.universal_destino_europa:
+        mapping[3] = settings.universal_destino_europa
+    if settings.universal_destino_resto_mundo:
+        mapping[4] = settings.universal_destino_resto_mundo
+    if settings.universal_destino_norteamerica:
+        mapping[5] = settings.universal_destino_norteamerica
+    return mapping
+
+
+def get_universal_trip_types(settings: Settings) -> dict[str, str]:
+    """trip_type interno -> TipoViaje SOAP Universal, solo valores configurados."""
+    mapping: dict[str, str] = {}
+    if settings.universal_tipo_viaje_unico_viaje:
+        mapping["unico_viaje"] = settings.universal_tipo_viaje_unico_viaje
+    if settings.universal_tipo_viaje_multiviaje:
+        mapping["multiviaje"] = settings.universal_tipo_viaje_multiviaje
+    if settings.universal_tipo_viaje_larga_estadia:
+        mapping["larga_estadia"] = settings.universal_tipo_viaje_larga_estadia
     return mapping
 
 
