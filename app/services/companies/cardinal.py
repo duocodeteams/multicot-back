@@ -2,9 +2,11 @@
 Adaptador para Cardinal Assistance (Evoucher 2).
 Documentación: https://evoucher.cardinalassistance.com/docs/doc.html
 
-IDs de moneda Cardinal (en costoLista/costoFinal.currency):
-    Por documentar: obtener de POST /parametros con parametros=monedas.
+IDs de moneda Cardinal (costoLista/costoFinal/costo*MonedaPais):
+    Confirmar con POST /parametros parametros=monedas.
     Ejemplo observado: 3 = USD, 7 = ARS (pesos).
+
+Precios: costoFinal / costoLista en USD; costoFinalMonedaPais / costoListaMonedaPais en ARS.
 """
 import logging
 from decimal import Decimal
@@ -131,7 +133,7 @@ class CardinalQuoteProvider:
                     return int(id_val)
         return None
 
-    # Comisión para calcular net_rate (final_rate_usd - comisión). Por ahora 50%.
+    # Comisión para net_rate: mismo % sobre el precio final en la moneda que usemos (USD o ARS).
     _COMISION_PORCENTAJE = Decimal("0.50")
 
     def _producto_to_quote_plan(
@@ -143,10 +145,15 @@ class CardinalQuoteProvider:
         if producto_id is None:
             return None
 
+        costo_lista = producto.get("costoLista") or {}
         costo_final = producto.get("costoFinal") or {}
-        amount_final = self._parse_amount(costo_final)
-        if amount_final is None:
+        costo_final_pais = producto.get("costoFinalMonedaPais") or {}
+
+        amount_final_usd = self._parse_amount(costo_final)
+        if amount_final_usd is None:
             return None
+
+        amount_final_ars = self._parse_amount(costo_final_pais)
 
         prestaciones = producto.get("prestaciones") or []
         coverage_amount = self._extract_coverage_from_prestaciones(prestaciones)
@@ -160,10 +167,20 @@ class CardinalQuoteProvider:
             if isinstance(p, dict)
         ]
 
-        # net_rate = final_rate_usd menos comisión (50% por ahora)
-        net_rate = (
-            amount_final * (Decimal("1") - self._COMISION_PORCENTAJE)
-        ).quantize(Decimal("0.01"))
+        factor = Decimal("1") - self._COMISION_PORCENTAJE
+        if amount_final_ars is not None:
+            final_rate = amount_final_ars.quantize(Decimal("0.01"))
+            net_rate = (amount_final_ars * factor).quantize(Decimal("0.01"))
+            if amount_final_usd > 0:
+                exchange_rate = (amount_final_ars / amount_final_usd).quantize(
+                    Decimal("0.0001")
+                )
+            else:
+                exchange_rate = Decimal("1")
+        else:
+            final_rate = amount_final_usd.quantize(Decimal("0.01"))
+            net_rate = (amount_final_usd * factor).quantize(Decimal("0.01"))
+            exchange_rate = Decimal("1")
 
         plan_id_str = str(producto_id)
         quote_id = f"{cotizacion_guid}|{plan_id_str}"
@@ -176,10 +193,11 @@ class CardinalQuoteProvider:
             plan_name=plan_name,
             coverage_amount=coverage_amount,
             benefits=benefits,
+            # net_rate queda en la misma moneda que final_rate (ARS si viene costoFinalMonedaPais).
             net_rate=net_rate,
-            final_rate_usd=amount_final,
-            exchange_rate=Decimal("1"),
-            final_rate=amount_final,
+            final_rate_usd=amount_final_usd.quantize(Decimal("0.01")),
+            exchange_rate=exchange_rate,
+            final_rate=final_rate,
         )
 
     def _extract_coverage_from_prestaciones(

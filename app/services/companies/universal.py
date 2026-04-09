@@ -1,4 +1,8 @@
-"""Adaptador para Universal Assistance (SOAP - LeadCotizadorOper)."""
+"""Adaptador para Universal Assistance (SOAP - LeadCotizadorOper).
+
+Precios en DatosLeadCotizadorOut: PrecioEmision (lista, ej. USD), PrecioEmisionLocal (moneda local),
+TipoCambio, MonedaLista, MonedaLocal.
+"""
 
 import logging
 import re
@@ -167,9 +171,26 @@ class UniversalQuoteProvider:
         if not plan_name:
             plan_name = self._child_text(datos, "Producto").strip() or product_id
 
-        precio_emision = self._parse_decimal(self._child_text(datos, "PrecioEmision"))
-        if precio_emision is None:
+        precio_usd = self._parse_decimal(self._child_text(datos, "PrecioEmision"))
+        if precio_usd is None:
             return None
+
+        precio_local = self._parse_decimal(self._child_text(datos, "PrecioEmisionLocal"))
+        tipo_cambio = self._parse_decimal(self._child_text(datos, "TipoCambio"))
+
+        if precio_local is not None:
+            final_rate = precio_local.quantize(Decimal("0.01"))
+            if tipo_cambio is not None:
+                exchange_rate = tipo_cambio.quantize(Decimal("0.0001"))
+            elif precio_usd > 0:
+                exchange_rate = (precio_local / precio_usd).quantize(Decimal("0.0001"))
+            else:
+                exchange_rate = Decimal("1")
+            net_rate = final_rate
+        else:
+            final_rate = precio_usd.quantize(Decimal("0.01"))
+            exchange_rate = Decimal("1")
+            net_rate = precio_usd.quantize(Decimal("0.01"))
 
         atributos = [n for n in list(datos) if self._local_name(n.tag) == "Atributo"]
         benefits = self._build_benefits(atributos)
@@ -184,10 +205,10 @@ class UniversalQuoteProvider:
             plan_name=plan_name,
             coverage_amount=coverage_amount,
             benefits=benefits,
-            net_rate=precio_emision,
-            final_rate_usd=precio_emision,
-            exchange_rate=Decimal("1"),
-            final_rate=precio_emision,
+            net_rate=net_rate,
+            final_rate_usd=precio_usd.quantize(Decimal("0.01")),
+            exchange_rate=exchange_rate,
+            final_rate=final_rate,
         )
 
     def _build_benefits(self, atributos: list[ET.Element]) -> list[Benefit]:

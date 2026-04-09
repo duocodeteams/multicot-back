@@ -21,6 +21,7 @@ Content-Type: application/json
     "Token": ""
 }
 
+@token = 4c7f7880-1b17-4a40-8618-e800128159c0
 ### cotizar go assistance GET
-GET https://sistema.aseguratuviaje.com/webapi18/api/CotizacionSeguroViajero?token=a5689caf-a137-40f9-84e4-56347b480f04&idseguro=0
+GET https://sistema.aseguratuviaje.com/webapi18/api/CotizacionSeguroViajero?token={{token}}&idseguro=0
 

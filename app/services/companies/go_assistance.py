@@ -2,6 +2,8 @@
 Adaptador para GoAssistance (ATV - Asegura Tu Viaje).
 API: POST para cotizar (devuelve Token; Productos suelen venir vacíos),
 GET con token para obtener los productos.
+
+Precios: Costo = USD (MonedaISO); CostoOrigen = moneda del país de origen (ej. ARS si PaisDesde=AR).
 """
 import logging
 from decimal import Decimal
@@ -134,9 +136,21 @@ class GoAssistanceQuoteProvider:
         if costo is None:
             return None
         try:
-            amount = Decimal(str(costo)).quantize(Decimal("0.01"))
+            amount_usd = Decimal(str(costo)).quantize(Decimal("0.01"))
         except Exception:
             return None
+
+        # Precio en moneda de origen (ARS para PaisDesde Argentina). Misma moneda que final_rate.
+        amount_origen = self._parse_optional_decimal(producto.get("CostoOrigen"))
+        if amount_origen is not None:
+            final_rate = amount_origen
+            if amount_usd > 0:
+                exchange_rate = (amount_origen / amount_usd).quantize(Decimal("0.0001"))
+            else:
+                exchange_rate = Decimal("1")
+        else:
+            final_rate = amount_usd
+            exchange_rate = Decimal("1")
 
         coverage_amount = self._parse_cobertura_enfermedad(
             producto.get("CoberturaEnfermedad")
@@ -153,11 +167,19 @@ class GoAssistanceQuoteProvider:
             plan_name=plan_name,
             coverage_amount=coverage_amount,
             benefits=benefits,
-            net_rate=amount,
-            final_rate_usd=amount,
-            exchange_rate=Decimal("1"),
-            final_rate=amount,
+            net_rate=final_rate,
+            final_rate_usd=amount_usd,
+            exchange_rate=exchange_rate,
+            final_rate=final_rate,
         )
+
+    def _parse_optional_decimal(self, value: Any) -> Decimal | None:
+        if value is None:
+            return None
+        try:
+            return Decimal(str(value)).quantize(Decimal("0.01"))
+        except Exception:
+            return None
 
     def _parse_cobertura_enfermedad(self, valor: Any) -> Decimal:
         """Parsea 'U$D 3.000', '€/U$D 45.000', 'USD 60.000' etc. a Decimal (3000, 45000, 60000)."""

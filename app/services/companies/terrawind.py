@@ -1,4 +1,7 @@
-"""Adaptador para Terrawind (SETW): cotización de planes en lote."""
+"""Adaptador para Terrawind (SETW): cotización de planes en lote.
+
+Precios en get_voucher_price: price en USD; local_price en moneda local (ej. ARS); tc = tipo de cambio.
+"""
 
 import logging
 import re
@@ -85,7 +88,26 @@ class TerrawindQuoteProvider:
             return None
 
         commission = self._parse_decimal(price_data.get("comission_price")) or Decimal("0")
-        net_rate = (final_rate_usd - commission).quantize(Decimal("0.01"))
+        net_usd = (final_rate_usd - commission).quantize(Decimal("0.01"))
+
+        local_price = self._parse_decimal(price_data.get("local_price"))
+        tc = self._parse_decimal(price_data.get("tc"))
+
+        if local_price is not None:
+            final_rate = local_price.quantize(Decimal("0.01"))
+            if tc is not None:
+                exchange_rate = tc.quantize(Decimal("0.0001"))
+                net_rate = (net_usd * tc).quantize(Decimal("0.01"))
+            elif final_rate_usd > 0:
+                exchange_rate = (local_price / final_rate_usd).quantize(Decimal("0.0001"))
+                net_rate = (net_usd * exchange_rate).quantize(Decimal("0.01"))
+            else:
+                exchange_rate = Decimal("1")
+                net_rate = net_usd
+        else:
+            final_rate = final_rate_usd
+            exchange_rate = Decimal("1")
+            net_rate = net_usd
 
         coverage_amount = self._extract_coverage_from_benefits(benefits)
 
@@ -98,8 +120,8 @@ class TerrawindQuoteProvider:
             benefits=benefits,
             net_rate=net_rate,
             final_rate_usd=final_rate_usd,
-            exchange_rate=Decimal("1"),
-            final_rate=final_rate_usd,
+            exchange_rate=exchange_rate,
+            final_rate=final_rate,
         )
 
     def _get_products(self, client: httpx.Client, base_url: str) -> list[dict[str, str]]:
