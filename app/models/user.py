@@ -17,6 +17,8 @@ class User(SQLModel, TimestampMixin, table=True):
     id: int | None = Field(default=None, primary_key=True)
     email: str = Field(unique=True, index=True)
     password_hash: str = Field()
+    # Misma contraseña cifrada (Fernet) para que el admin pueda verla; requiere PASSWORD_ENCRYPTION_KEY.
+    password_encrypted: str | None = Field(default=None)
     role: UserRole = Field(index=True)
     active: bool = Field(default=True)
     agency_id: int | None = Field(default=None, foreign_key="agencies.id")  # Solo para role=AGENCY

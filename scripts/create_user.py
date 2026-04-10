@@ -11,6 +11,7 @@ from sqlmodel import Session, select
 from decimal import Decimal
 
 from app.core.database import engine, create_db_and_tables
+from app.core.retrievable_password import encrypt_for_storage
 from app.core.security import hash_password
 from app.models import Agency, Seller, User
 from app.models.agency import BillingFrequency, PaymentMethod, TaxCondition
@@ -26,6 +27,7 @@ def main():
             admin = User(
                 email="admin@test.com",
                 password_hash=hash_password("password123"),
+                password_encrypted=encrypt_for_storage("password123"),
                 role=UserRole.ADMIN,
             )
             session.add(admin)
@@ -62,6 +64,7 @@ def main():
         user_agency = User(
             email="agencia@test.com",
             password_hash=hash_password("password123"),
+            password_encrypted=encrypt_for_storage("password123"),
             role=UserRole.AGENCY,
             agency_id=agency.id,
         )
@@ -71,6 +74,7 @@ def main():
         user_seller = User(
             email="vendedor@test.com",
             password_hash=hash_password("password123"),
+            password_encrypted=encrypt_for_storage("password123"),
             role=UserRole.SELLER,
         )
         session.add(user_seller)

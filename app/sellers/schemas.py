@@ -43,6 +43,8 @@ class SellerUserResponse(BaseModel):
     id: int
     email: str
     role: UserRole = UserRole.SELLER
+    # Solo se rellena para ADMIN cuando hay cifrado guardado.
+    password: str | None = None
 
     model_config = {"from_attributes": True}
 

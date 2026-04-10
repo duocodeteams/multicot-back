@@ -3,6 +3,7 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 
 from app.core.database import get_session
+from app.core.retrievable_password import decrypt_for_admin
 from app.core.security import get_current_admin_or_agency_user
 from app.models import User
 from app.models.user import UserRole
@@ -25,7 +26,15 @@ from sqlmodel import Session
 router = APIRouter()
 
 
-def _seller_to_response(seller, user) -> SellerResponse:
+def _seller_to_response(seller, user, *, include_password: bool) -> SellerResponse:
+    user_resp = None
+    if user:
+        user_resp = SellerUserResponse(
+            id=user.id,
+            email=user.email,
+            role=user.role,
+            password=decrypt_for_admin(user.password_encrypted) if include_password else None,
+        )
     return SellerResponse(
         id=seller.id,
         user_id=seller.user_id,
@@ -37,7 +46,7 @@ def _seller_to_response(seller, user) -> SellerResponse:
         birth_date=seller.birth_date,
         comments=seller.comments,
         commission=seller.commission,
-        user=SellerUserResponse(id=user.id, email=user.email, role=user.role) if user else None,
+        user=user_resp,
     )
 
 
@@ -71,7 +80,9 @@ def create_seller(
 
     try:
         seller, user = create_seller_with_user(session, data, agency_id)
-        return _seller_to_response(seller, user)
+        return _seller_to_response(
+            seller, user, include_password=(current_user.role == UserRole.ADMIN)
+        )
     except ValueError as e:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
 
@@ -108,7 +119,11 @@ def list_sellers_route(
         limit=limit,
         offset=offset,
     )
-    items = [_seller_to_response(seller, user) for seller, user in items_tuples]
+    include_password = current_user.role == UserRole.ADMIN
+    items = [
+        _seller_to_response(seller, user, include_password=include_password)
+        for seller, user in items_tuples
+    ]
     return SellerListResponse(items=items, total=total, limit=limit, offset=offset)
 
 
@@ -124,7 +139,9 @@ def get_seller(
     if result is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Vendedor no encontrado")
     seller, user = result
-    return _seller_to_response(seller, user)
+    return _seller_to_response(
+        seller, user, include_password=(current_user.role == UserRole.ADMIN)
+    )
 
 
 @router.patch("/{seller_id}", response_model=SellerResponse)
@@ -143,7 +160,9 @@ def patch_seller(
     if result is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Vendedor no encontrado")
     seller, user = result
-    return _seller_to_response(seller, user)
+    return _seller_to_response(
+        seller, user, include_password=(current_user.role == UserRole.ADMIN)
+    )
 
 
 @router.delete("/{seller_id}", status_code=status.HTTP_204_NO_CONTENT)

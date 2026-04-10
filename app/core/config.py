@@ -1,6 +1,11 @@
 from functools import lru_cache
+from pathlib import Path
 
-from pydantic_settings import BaseSettings
+from pydantic import Field
+from pydantic_settings import BaseSettings, SettingsConfigDict
+
+# Raíz del repo: app/core/config.py -> ../../..
+_ENV_PATH = Path(__file__).resolve().parent.parent.parent / ".env"
 
 
 # Mapeo: destination_id (frontend) → Cardinal destinoId.
@@ -8,6 +13,12 @@ from pydantic_settings import BaseSettings
 
 
 class Settings(BaseSettings):
+    model_config = SettingsConfigDict(
+        env_file=str(_ENV_PATH),
+        env_file_encoding="utf-8",
+        extra="ignore",
+    )
+
     app_name: str = "Cotizador API"
     environment: str = "development"
     # Lista separada por comas de orígenes permitidos por CORS.
@@ -19,6 +30,12 @@ class Settings(BaseSettings):
     # JWT - generar clave aleatoria: python -c "import secrets; print(secrets.token_hex(32))"
     secret_key: str = "dev-secret-cambiar-en-produccion"
     jwt_expire_minutes: int = 1440  # 24 horas
+    # Fernet (32 bytes url-safe base64): python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
+    # Vacío = no se guarda contraseña recuperable para el admin.
+    password_encryption_key: str = Field(
+        default="",
+        validation_alias="PASSWORD_ENCRYPTION_KEY",
+    )
 
     # Cardinal Assistance (Evoucher 2)
     cardinal_base_url: str = "https://ev2.bluesoft.com.ar/webservice"
@@ -74,8 +91,6 @@ class Settings(BaseSettings):
     universal_tipo_viaje_unico_viaje: str = "Un viaje"
     universal_tipo_viaje_multiviaje: str = "Varios viajes"
     universal_tipo_viaje_larga_estadia: str = ""
-
-    model_config = {"env_file": ".env", "extra": "ignore"}
 
 
 def get_cardinal_destino_ids(settings: Settings) -> dict[int, int]:

@@ -42,6 +42,8 @@ class AgencyUserResponse(BaseModel):
     id: int
     email: str
     role: UserRole = UserRole.AGENCY
+    # Solo se rellena en respuestas de admin cuando hay cifrado guardado.
+    password: str | None = None
 
     model_config = {"from_attributes": True}
 
