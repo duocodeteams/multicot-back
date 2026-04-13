@@ -6,6 +6,7 @@ from decimal import Decimal
 from typing import Any
 
 import httpx
+import re
 
 from app.core.config import get_settings
 from app.quotations.schemas import (
@@ -348,6 +349,50 @@ class NewTravelQuoteProvider:
             )
         return benefits
 
+    def _extract_coverage_from_benefits(self, benefits: list[Benefit]) -> Decimal:
+        # Regla New Travel: el "monto global" (máximo) viene en el primer beneficio.
+        if not benefits:
+            return Decimal("0")
+        first_amount = self._parse_usd_coverage(benefits[0].valor)
+        if first_amount is None:
+            return Decimal("0")
+        return first_amount
+
+        return Decimal("0")
+
+    def _parse_coverage_value(self, value: str) -> Decimal:
+        if not value:
+            return Decimal("0")
+        s = value.upper().replace("USD", "").strip()
+        s = s.replace(".", "").replace(",", ".")
+        try:
+            return Decimal(s)
+        except Exception:
+            return Decimal("0")
+
+    def _parse_usd_coverage(self, raw_value: str) -> Decimal | None:
+        if not raw_value:
+            return None
+        upper_value = raw_value.upper()
+        # New Travel puede venir en USD o EUR (incluyendo símbolo €).
+        if (
+            "USD" not in upper_value
+            and "U$S" not in upper_value
+            and "EUR" not in upper_value
+            and "€" not in raw_value
+        ):
+            return None
+        match = re.search(r"(\d[\d\.,]*)", raw_value)
+        if not match:
+            return None
+        digits_only = re.sub(r"\D", "", match.group(1))
+        if not digits_only:
+            return None
+        try:
+            return Decimal(digits_only)
+        except Exception:
+            return None
+
 
 def _preview(value: Any, max_len: int = 800) -> str:
     """
@@ -363,19 +408,3 @@ def _preview(value: Any, max_len: int = 800) -> str:
     if len(s) <= max_len:
         return s
     return s[:max_len] + "...<truncated>"
-
-    def _extract_coverage_from_benefits(self, benefits: list[Benefit]) -> Decimal:
-        for benefit in benefits:
-            if benefit.nombre.strip().lower() == "monto global":
-                return self._parse_coverage_value(benefit.valor)
-        return Decimal("0")
-
-    def _parse_coverage_value(self, value: str) -> Decimal:
-        if not value:
-            return Decimal("0")
-        s = value.upper().replace("USD", "").strip()
-        s = s.replace(".", "").replace(",", ".")
-        try:
-            return Decimal(s)
-        except Exception:
-            return Decimal("0")

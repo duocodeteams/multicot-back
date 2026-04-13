@@ -14,7 +14,7 @@ from app.services.companies.universal import UniversalQuoteProvider
 logger = logging.getLogger(__name__)
 
 _PROVIDERS = [
-    PaxQuoteProvider(),
+    # PaxQuoteProvider(),
     CardinalQuoteProvider(),
     GoAssistanceQuoteProvider(),
     TerrawindQuoteProvider(),
