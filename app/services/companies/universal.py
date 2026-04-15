@@ -6,6 +6,7 @@ TipoCambio, MonedaLista, MonedaLocal.
 
 import logging
 import re
+from datetime import timedelta
 from decimal import Decimal, InvalidOperation
 from xml.etree import ElementTree as ET
 
@@ -16,7 +17,7 @@ from app.core.config import (
     get_universal_destinos,
     get_universal_trip_types,
 )
-from app.quotations.schemas import Benefit, QuotePlan, QuoteRequest
+from app.quotations.schemas import Benefit, PlanException, QuotePlan, QuoteRequest
 
 logger = logging.getLogger(__name__)
 
@@ -92,6 +93,17 @@ class UniversalQuoteProvider:
         cant_cotizaciones = "0"
         convenio = settings.universal_convenio
         folleto = settings.universal_folleto
+        fecha_inicio = request.departure_date
+        fecha_fin = request.return_date
+
+        # Universal: para multiviaje (anual) se envían fechas equivalentes a un año.
+        # Ejemplo: 04/25/2026 -> 04/24/2027
+        if request.trip_type == "multiviaje":
+            try:
+                fecha_fin = fecha_inicio.replace(year=fecha_inicio.year + 1) - timedelta(days=1)
+            except ValueError:
+                # Manejo Feb 29: si no existe en el año siguiente, usar Feb 28.
+                fecha_fin = fecha_inicio.replace(year=fecha_inicio.year + 1, day=28) - timedelta(days=1)
 
         def age_tag(i: int, age: int | None) -> str:
             val = "" if age is None else str(age)
@@ -122,8 +134,8 @@ class UniversalQuoteProvider:
             f"<ual:PaisOrigen>{settings.universal_pais_origen_ar}</ual:PaisOrigen>"
             f"<ual:Destino>{destino}</ual:Destino>"
             f"<ual:TipoViaje>{tipo_viaje}</ual:TipoViaje>"
-            f"<ual:FechaInicio>{request.departure_date.strftime('%m/%d/%Y')}</ual:FechaInicio>"
-            f"<ual:FechaFin>{request.return_date.strftime('%m/%d/%Y')}</ual:FechaFin>"
+            f"<ual:FechaInicio>{fecha_inicio.strftime('%m/%d/%Y')}</ual:FechaInicio>"
+            f"<ual:FechaFin>{fecha_fin.strftime('%m/%d/%Y')}</ual:FechaFin>"
             f"<ual:CantidadPasajeros>{len(request.ages)}</ual:CantidadPasajeros>"
             "<ual:PackFamiliar></ual:PackFamiliar>"
             f"{edades_xml}"
@@ -167,9 +179,10 @@ class UniversalQuoteProvider:
         if not product_id:
             return None
 
-        plan_name = self._child_text(datos, "NombreProducto").strip()
+        # Regla Universal: el tag principal para el nombre es "Producto".
+        plan_name = self._child_text(datos, "Producto").strip()
         if not plan_name:
-            plan_name = self._child_text(datos, "Producto").strip() or product_id
+            plan_name = self._child_text(datos, "NombreProducto").strip() or product_id
 
         precio_usd = self._parse_decimal(self._child_text(datos, "PrecioEmision"))
         if precio_usd is None:
@@ -177,6 +190,12 @@ class UniversalQuoteProvider:
 
         precio_local = self._parse_decimal(self._child_text(datos, "PrecioEmisionLocal"))
         tipo_cambio = self._parse_decimal(self._child_text(datos, "TipoCambio"))
+
+        # Promociones / base (si Universal lo devuelve)
+        base_usd = self._parse_decimal(self._child_text(datos, "PrecioBaseLista"))
+        base_local = self._parse_decimal(self._child_text(datos, "PrecioBaseLocal"))
+        # DescMatriz viene como entero (ej: 20 => 20%)
+        discount_pct = self._parse_decimal(self._child_text(datos, "DescMatriz"))
 
         if precio_local is not None:
             final_rate = precio_local.quantize(Decimal("0.01"))
@@ -195,6 +214,7 @@ class UniversalQuoteProvider:
         atributos = [n for n in list(datos) if self._local_name(n.tag) == "Atributo"]
         benefits = self._build_benefits(atributos)
         coverage_amount = self._coverage_from_first_attribute(atributos)
+        exceptions = self._extract_exceptions(atributos)
 
         return QuotePlan(
             company=self.company_name,
@@ -209,6 +229,10 @@ class UniversalQuoteProvider:
             final_rate_usd=precio_usd.quantize(Decimal("0.01")),
             exchange_rate=exchange_rate,
             final_rate=final_rate,
+            base_rate_usd=base_usd,
+            base_rate=base_local,
+            discount_pct=discount_pct,
+            exceptions=exceptions,
         )
 
     def _build_benefits(self, atributos: list[ET.Element]) -> list[Benefit]:
@@ -221,6 +245,30 @@ class UniversalQuoteProvider:
                 valor = f"{unidad} {valor}"
             benefits.append(Benefit(id=idx, nombre=nombre, valor=valor))
         return benefits
+
+    def _extract_exceptions(self, atributos: list[ET.Element]) -> list[PlanException]:
+        """
+        Universal: las excepciones vienen dentro de cada <Atributo>/<Excepciones>/<Descipcion>.
+        A veces puede venir como <Descripcion> (sin typo), soportamos ambas.
+        """
+        result: list[PlanException] = []
+        seen: set[tuple[str, str, str | None]] = set()
+
+        for attr in atributos:
+            benefit_name = self._child_text(attr, "NombreVisible").strip() or self._child_text(attr, "Nombre").strip()
+            exc_nodes = [n for n in list(attr) if self._local_name(n.tag) == "Excepciones"]
+            for exc in exc_nodes:
+                desc = self._child_text(exc, "Descipcion").strip() or self._child_text(exc, "Descripcion").strip()
+                rango = self._child_text(exc, "Rango").strip() or None
+                if not desc or not benefit_name:
+                    continue
+                key = (benefit_name, desc, rango)
+                if key in seen:
+                    continue
+                seen.add(key)
+                result.append(PlanException(benefit_name=benefit_name, description=desc, range=rango))
+
+        return result
 
     def _coverage_from_first_attribute(self, atributos: list[ET.Element]) -> Decimal:
         if not atributos:

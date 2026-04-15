@@ -6,15 +6,19 @@
 @username = WSPRUEBAAR
 @password = 1234
 @organizacionEmisora = 1-CVOEAYQ
-@convenio = 1-DEY2E6X
+#@convenio = 1-DEY2E6X
+@convenio = 1-DEY2E2H
 @paisOrigen = ARGENTINA
 @destino = Europa
 @tipoViaje = Un viaje
-@fechaInicio = 12/05/2026
-@fechaFin = 12/10/2026
-@cantidadPasajeros = 1
-@edad1 = 49
+#@tipoViaje = Varios viajes
 
+@fechaInicio = 05/25/2026
+@fechaFin = 05/30/2026
+@cantidadPasajeros = 1
+@edad1 = 80
+
+### 
 POST {{baseUrl}}
 Content-Type: text/xml;charset=UTF-8
 Accept: text/xml

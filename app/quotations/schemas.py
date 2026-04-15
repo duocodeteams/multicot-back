@@ -69,6 +69,14 @@ class Benefit(BaseModel):
     valor: str = Field(..., description="Valor/texto de la prestación (ej. USS 50.000)")
 
 
+class PlanException(BaseModel):
+    """Excepción asociada a una prestación (para mostrar en 'Ver más')."""
+
+    benefit_name: str = Field(..., description="Nombre de la prestación a la que aplica la excepción")
+    description: str = Field(..., description="Descripción de la excepción")
+    range: str | None = Field(default=None, description="Rango/condición adicional (si aplica)")
+
+
 class QuotePlan(BaseModel):
     """Un plan/opción de cotización (formato unificado por compañía)."""
 
@@ -82,6 +90,11 @@ class QuotePlan(BaseModel):
     final_rate_usd: Decimal = Field(..., description="Tarifa final USD")
     exchange_rate: Decimal = Field(..., description="Tasa de cambio")
     final_rate: Decimal = Field(..., description="Tarifa final")
+    # Promociones / precio de lista (opcionales; no todas las compañías lo informan).
+    base_rate_usd: Decimal | None = Field(default=None, description="Precio base (lista) en USD, si la compañía lo informa")
+    base_rate: Decimal | None = Field(default=None, description="Precio base (lista) en moneda local (misma moneda que final_rate), si la compañía lo informa")
+    discount_pct: Decimal | None = Field(default=None, description="Porcentaje de descuento aplicado (0-100), si la compañía lo informa")
+    exceptions: list[PlanException] = Field(default_factory=list, description="Excepciones del producto (para mostrar en 'Ver más'), si la compañía las informa")
 
 
 class QuoteResponse(BaseModel):
