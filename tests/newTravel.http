@@ -1,0 +1,136 @@
+# @base_url = https://cacao.ilstechnik.com/api/v1
+@base_url = https://newtravelassistance.page/api/v1
+@token = hhsD7IrHxfiegGBefo
+@language = "spa"
+
+
+### get token
+POST {{base_url}}/auth/get_token
+Content-Type: application/json
+
+{
+  "user": "biant_WS_PROD",
+  "password": "yrBjtDwB"
+}
+
+### get token PROD
+POST {{base_url}}/auth/get_token
+Content-Type: application/json
+
+{
+  "user": "biant_WS_PROD",
+  "password": "yrBjtDwB"
+}
+
+
+### POST para obtener el listado de planes
+POST {{base_url}}/plans/list
+token: {{token}}
+Content-Type: application/json
+
+## response primer plan 
+{
+  "status": "OK",
+  "data": [
+    {
+      "id": "2329",
+      "idCategory": "2",
+      "category": "Anuales - Multiviajes",
+      "plan": "MULTIVIAJE NTA",
+      "description": "",
+      "idStatus": "1",
+      "commissions": "N",
+      "tax": "N",
+      "fee": "N",
+      "surchargeAge": "N",
+      "surchargeTerritory": "N",
+      "allowMinPurchase": "Y",
+      "localPlan": "N",
+      "localCountry": "N",
+      "useLocalPrices": "N",
+      "idCurrency": "31",
+      "deductible": "0.00",
+      "maxBenefit": "0.00",
+      "premiumType": "normal",
+      "minDays": "365",
+      "maxDays": "365",
+      "minNumPass": "1",
+      "maxNumPass": "9",
+      "minAge": "0",
+      "maxAge": "75",
+      "overage": "75",
+      "overageFactor": "0.00",
+      "familyPlan": "N",
+      "familyFactor": "0.00",
+      "familyMaxNumMinors": null,
+      "couplePlan": "N",
+      "coupleFactor": "0.00",
+      "restrictions": {
+        "availableTerritory": "1",
+        "restrictedCountries": []
+      }
+    },
+    # ... otros planes
+  ]
+}
+
+### 2331 - 2330 - 
+### obtener plan por id 
+GET {{base_url}}/plans/plan/2329
+token: {{token}}
+
+### obetener beneficios por id de plan
+GET {{base_url}}/plans/benefits/2329
+token: {{token}}
+
+## response primeros beneficios
+{
+  "status": "OK",
+  "data": [
+    {
+      "idBenefit": "321",
+      "benefit": "Monto Global",
+      "coverage": "USD 150.000",
+      "idBenefitType": "7",
+      "benefitType": "SmartDelay"
+    },
+    {
+      "idBenefit": "322",
+      "benefit": "Gastos m\u00e9dicos por accidente - Incluye COVID",
+      "coverage": "USD 150.000",
+      "idBenefitType": "1",
+      "benefitType": "M\u00e9dico"
+    },
+    # ... otros beneficios
+  ]
+}
+
+
+### Get primas de plan 
+GET {{base_url}}/plans/premiums/2331
+token: {{token}}
+
+### Get de territorios
+GET {{base_url}}/generals/territories
+token: {{token}}
+
+### obtener monedas
+GET {{base_url}}/currencies/list
+token: {{token}}
+
+### OBTENER MONEDA ESPECIFICA
+GET {{base_url}}/currencies/currency/AR
+token: {{token}}
+
+### POST para cotizar
+POST {{base_url}}/orders/quote
+token: {{token}}
+Content-Type: application/json
+
+{
+  "origin": "AR",
+  "destination": "1",
+  "startDate": "2026/04/20",
+  "endDate": "2026/04/29",
+  "ages": [22, 30]
+}

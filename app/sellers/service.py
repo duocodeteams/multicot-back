@@ -3,6 +3,7 @@ from decimal import Decimal
 from sqlalchemy import func
 from sqlmodel import Session, select
 
+from app.core.retrievable_password import encrypt_for_storage
 from app.core.security import hash_password
 from app.models import Seller, User
 from app.models.user import UserRole
@@ -26,6 +27,7 @@ def create_seller_with_user(
     user = User(
         email=data.user.email,
         password_hash=hash_password(data.user.password),
+        password_encrypted=encrypt_for_storage(data.user.password),
         role=UserRole.SELLER,
     )
     session.add(user)

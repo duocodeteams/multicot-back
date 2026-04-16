@@ -1,0 +1,17 @@
+# Pax Assistance API
+# Ambientes: STG https://www.stg.paxassistance.com | PROD https://www.paxassistance.com
+# Reemplazar PAX_API_KEY con tu API Key
+
+@baseUrl = https://www.stg.paxassistance.com
+@paxApiKey = DzbHT39WmgoYWB827WJp/RtGPnN5vOPCnOAjme87
+
+### --- Cotización ---
+### GET /api/assistance/external/quoter
+### Query: adults, infants, children, elder, tripType, startDate, endDate, destination[], countryCode
+### Tipos viaje: ONE_TRIP | LONG_STAY | MULTI_TRIP
+### Destinos: SOUTH_AMERICA | EUROPE | NORTH_AMERICA | AFRICA | ASIA_OCEANIA | CARRIBEAN | MULTI | OWN_COUNTRY
+
+GET {{baseUrl}}/api/assistance/external/quoter?adults=1&countryCode=AR&destination[]=SOUTH_AMERICA&tripType=ONE_TRIP&startDate=2026-08-13&endDate=2026-08-20
+Content-Type: application/json
+x-api-key: {{paxApiKey}}
+

@@ -17,6 +17,7 @@ from app.agencies.service import (
     update_agency,
 )
 from app.core.database import get_session
+from app.core.retrievable_password import decrypt_for_admin
 from app.core.security import get_current_admin_user
 from app.models import User
 from sqlmodel import Session
@@ -26,6 +27,14 @@ router = APIRouter()
 
 def _agency_to_response(agency, user) -> AgencyResponse:
     """Construye AgencyResponse desde agency y user."""
+    user_resp = None
+    if user:
+        user_resp = AgencyUserResponse(
+            id=user.id,
+            email=user.email,
+            role=user.role,
+            password=decrypt_for_admin(user.password_encrypted),
+        )
     return AgencyResponse(
         id=agency.id,
         name=agency.name,
@@ -47,11 +56,7 @@ def _agency_to_response(agency, user) -> AgencyResponse:
         tax_condition=agency.tax_condition,
         bank_account=agency.bank_account,
         ssn_register=agency.ssn_register,
-        user=AgencyUserResponse(
-            id=user.id, email=user.email, role=user.role
-        )
-        if user
-        else None,
+        user=user_resp,
     )
 
 
