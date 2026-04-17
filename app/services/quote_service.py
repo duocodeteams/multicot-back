@@ -17,7 +17,7 @@ _PROVIDERS = [
     # PaxQuoteProvider(),
     CardinalQuoteProvider(),
     GoAssistanceQuoteProvider(),
-    TerrawindQuoteProvider(),
+    # TerrawindQuoteProvider(),
     NewTravelQuoteProvider(),
     InterAssistQuoteProvider(),
     UniversalQuoteProvider(),
