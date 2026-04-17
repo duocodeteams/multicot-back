@@ -9,6 +9,7 @@ IDs de moneda Cardinal (costoLista/costoFinal/costo*MonedaPais):
 Precios: costoFinal / costoLista en USD; costoFinalMonedaPais / costoListaMonedaPais en ARS.
 """
 import logging
+import re
 from decimal import Decimal
 from typing import Any
 
@@ -145,7 +146,6 @@ class CardinalQuoteProvider:
         if producto_id is None:
             return None
 
-        costo_lista = producto.get("costoLista") or {}
         costo_final = producto.get("costoFinal") or {}
         costo_final_pais = producto.get("costoFinalMonedaPais") or {}
 
@@ -208,17 +208,45 @@ class CardinalQuoteProvider:
             if not isinstance(p, dict):
                 continue
             nombre = (p.get("nombre") or "").strip()
-            if "Tope Máximo Global" in nombre:
+            prestacion_id = p.get("prestacionId")
+            # Cardinal suele identificar "Tope Máximo Global" con prestacionId=75.
+            if "Tope Máximo Global" in nombre or prestacion_id == 75:
                 valor_str = (p.get("valor") or "").strip()
                 return self._parse_coverage_valor(valor_str)
         return Decimal("0")
 
     def _parse_coverage_valor(self, valor_str: str) -> Decimal:
-        """Parsea 'USS 50.000 ' o 'USS 150.000' a Decimal (50000, 150000)."""
+        """Parsea strings como 'USD 50.000' o 'US$ 150,000' a Decimal (50000, 150000)."""
         if not valor_str:
             return Decimal("0")
-        s = valor_str.upper().replace("USS", "").strip()
-        s = s.replace(".", "").replace(",", ".")
+        s = valor_str.upper().strip()
+        # Conserva solo números y separadores para soportar variantes de moneda (USD/US$/USS/etc).
+        s = re.sub(r"[^0-9.,]", "", s)
+        if not s:
+            return Decimal("0")
+        # Si incluye punto y coma, asumimos el último separador como decimal; el resto son miles.
+        if "." in s and "," in s:
+            last_dot = s.rfind(".")
+            last_comma = s.rfind(",")
+            decimal_sep = "." if last_dot > last_comma else ","
+            thousands_sep = "," if decimal_sep == "." else "."
+            s = s.replace(thousands_sep, "")
+            if decimal_sep == ",":
+                s = s.replace(",", ".")
+        elif "." in s:
+            # "50.000" => miles; "50000.50" => decimal.
+            parts = s.split(".")
+            if len(parts) > 1 and all(part.isdigit() for part in parts):
+                if len(parts[-1]) == 3:
+                    s = "".join(parts)
+        elif "," in s:
+            # "50,000" => miles; "50000,50" => decimal.
+            parts = s.split(",")
+            if len(parts) > 1 and all(part.isdigit() for part in parts):
+                if len(parts[-1]) == 3:
+                    s = "".join(parts)
+                else:
+                    s = s.replace(",", ".")
         try:
             return Decimal(s)
         except Exception:
