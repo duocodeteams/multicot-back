@@ -1,0 +1,37 @@
+@interassistBaseUrl = https://api-staging.interassist.com
+@interassistToken = 401|tcxEOi7uAMBpaMrm41PZplYrnbqMxg13jsE6FIE1ae0fac73
+
+@appBaseUrl = http://localhost:8000
+@appEmail = admin@test.com
+@appPassword = password123
+@appToken = eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxIiwiZW1haWwiOiJhZG1pbkB0ZXN0LmNvbSIsInJvbGUiOiJhZG1pbiIsImFnZW5jeV9pZCI6bnVsbCwiZXhwIjoxNzg2NjI2ODYzfQ.UgNMKA8aMlVLVZEbxPXaBDagY90SRBYNfyNLd3QggZs
+
+### Inter Assist — listar planes (API externa)
+GET {{interassistBaseUrl}}/api/planes?page=1
+Accept: application/json
+Authorization: Bearer {{interassistToken}}
+
+### App — login
+POST {{appBaseUrl}}/v1/auth/login
+Content-Type: application/json
+Accept: application/json
+
+{
+  "email": "{{appEmail}}",
+  "password": "{{appPassword}}"
+}
+
+### App — cotizar (incluye Inter Assist)
+POST {{appBaseUrl}}/v1/quotes
+Authorization: Bearer {{appToken}}
+Content-Type: application/json
+Accept: application/json
+
+{
+  "departure_date": "2026-09-01",
+  "return_date": "2026-09-12",
+  "ages": [30],
+  "origin": "AR",
+  "destination_id": 2,
+  "trip_type": "unico_viaje"
+}
