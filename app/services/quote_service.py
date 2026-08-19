@@ -6,6 +6,7 @@ from app.services.companies.cardinal import CardinalQuoteProvider
 from app.services.companies.go_assistance import GoAssistanceQuoteProvider
 from app.services.companies.inter_assist import InterAssistQuoteProvider
 from app.services.companies.new_travel import NewTravelQuoteProvider
+from app.services.companies.omint import OmintQuoteProvider
 from app.services.companies.pax import PaxQuoteProvider
 from app.services.companies.terrawind import TerrawindQuoteProvider
 from app.services.companies.universal import UniversalQuoteProvider
@@ -20,7 +21,8 @@ _PROVIDERS = [
     TerrawindQuoteProvider(),
     NewTravelQuoteProvider(),
     InterAssistQuoteProvider(),
-    # UniversalQuoteProvider(),
+    UniversalQuoteProvider(),
+    OmintQuoteProvider(),
 ]
 
 

@@ -31,8 +31,6 @@ from app.quotations.schemas import (
 
 logger = logging.getLogger(__name__)
 
-# destination_id (cotizador) → id de destino Inter Assist
-# Catálogo observado: 1=INTERNACIONAL, 2=LATINOAMERICA, 3=EUROPA
 _DESTINATION_TO_INTERASSIST: dict[int, int] = {
     DESTINO_ID_LATINOAMERICA: 2,
     DESTINO_ID_EUROPA: 3,
@@ -40,12 +38,8 @@ _DESTINATION_TO_INTERASSIST: dict[int, int] = {
     DESTINO_ID_NORTEAMERICA: 1,
 }
 
-# Tramos diarios del plan (días inclusive del viaje).
 _DAILY_BRACKETS: tuple[int, ...] = (5, 10, 16, 22, 30, 45, 60, 90)
-
-# Tramos anuales (días máximos corridos típicos de multiviaje).
 _ANNUAL_BRACKETS: tuple[int, ...] = (30, 60, 90)
-
 _MAX_PAGES = 50
 
 
@@ -57,22 +51,17 @@ class InterAssistQuoteProvider:
 
     def get_quotes(self, request: QuoteRequest) -> list[QuotePlan]:
         settings = self._settings
-        print(f"[InterAssist DEBUG] get_quotes called. api_key set: {bool(settings.interassist_api_key)}, base_url: {settings.interassist_base_url}")
         if not settings.interassist_api_key:
-            print("[InterAssist DEBUG] SIN API KEY → return []")
             return []
 
         destino_id = _DESTINATION_TO_INTERASSIST.get(request.destination_id)
         if destino_id is None:
-            print(f"[InterAssist DEBUG] destination_id={request.destination_id} sin mapeo → return []")
             return []
 
         if request.origin != "AR":
-            print(f"[InterAssist DEBUG] origin='{request.origin}' no soportado → return []")
             return []
 
         trip_days = (request.return_date - request.departure_date).days + 1
-        print(f"[InterAssist DEBUG] trip_days={trip_days}, trip_type={request.trip_type}, ages={request.ages}, destino_id={destino_id}")
         if trip_days < 1:
             return []
 
@@ -85,28 +74,16 @@ class InterAssistQuoteProvider:
         with httpx.Client(timeout=30.0) as client:
             try:
                 raw_plans = self._fetch_all_plans(client, base_url, headers)
-            except httpx.HTTPError as e:
-                print(f"[InterAssist DEBUG] error HTTP obteniendo planes: {e}")
+            except httpx.HTTPError:
                 logger.exception("InterAssist: error HTTP obteniendo planes")
                 return []
-            except Exception as e:
-                print(f"[InterAssist DEBUG] error inesperado obteniendo planes: {e}")
+            except Exception:
                 logger.exception("InterAssist: error inesperado obteniendo planes")
                 return []
 
-        print(f"[InterAssist DEBUG] raw_plans obtenidos: {len(raw_plans)}")
-
         pais_id = settings.interassist_pais_argentina_id
         plans: list[QuotePlan] = []
-        skipped_inactive = 0
-        skipped_destino = 0
-        skipped_pais = 0
-        skipped_edad = 0
-        skipped_precio = 0
-        skipped_error = 0
         for raw in raw_plans:
-            plan_id = (raw or {}).get("id")
-            plan_name = (raw or {}).get("nombre", "?")
             try:
                 plan = self._plan_to_quote_plan(
                     raw=raw,
@@ -115,37 +92,11 @@ class InterAssistQuoteProvider:
                     pais_id=pais_id,
                     trip_days=trip_days,
                 )
-            except Exception as e:
-                print(f"[InterAssist DEBUG] EXCEPCION plan id={plan_id} name='{plan_name}': {e}")
-                skipped_error += 1
+            except Exception:
                 continue
             if plan:
                 plans.append(plan)
-            else:
-                # Detectar motivo del descarte
-                if not raw.get("activo", True):
-                    skipped_inactive += 1
-                elif not self._matches_destino(raw, destino_id):
-                    skipped_destino += 1
-                elif not self._matches_pais(raw, pais_id):
-                    skipped_pais += 1
-                elif raw.get("edad_maxima") is not None:
-                    try:
-                        max_age = int(raw["edad_maxima"])
-                        if any(age > max_age for age in request.ages):
-                            skipped_edad += 1
-                        else:
-                            skipped_precio += 1
-                    except (TypeError, ValueError):
-                        skipped_precio += 1
-                else:
-                    skipped_precio += 1
 
-        print(
-            f"[InterAssist DEBUG] RESULTADO: {len(plans)} planes ok de {len(raw_plans)} totales. "
-            f"Descartados → inactivo={skipped_inactive} destino={skipped_destino} "
-            f"pais={skipped_pais} edad={skipped_edad} precio={skipped_precio} error={skipped_error}"
-        )
         return plans
 
     def _fetch_all_plans(
@@ -160,15 +111,12 @@ class InterAssistQuoteProvider:
 
         while page <= _MAX_PAGES:
             url = f"{base_url}/api/planes"
-            print(f"[InterAssist DEBUG] GET {url}?page={page}")
             response = client.get(
                 url,
                 headers=headers,
                 params={"page": page},
             )
-            print(f"[InterAssist DEBUG] HTTP {response.status_code} (page={page}), content-length={len(response.text)}")
             if response.status_code >= 400:
-                print(f"[InterAssist DEBUG] ERROR body: {response.text[:500]}")
                 logger.error(
                     "InterAssist: GET /api/planes page=%s HTTP %s - body=%s",
                     page,
@@ -179,7 +127,6 @@ class InterAssistQuoteProvider:
             payload = response.json()
 
             page_items, detected_last = self._extract_page(payload)
-            print(f"[InterAssist DEBUG] page={page}: items={len(page_items)}, last_page={detected_last}")
             if not page_items:
                 break
 

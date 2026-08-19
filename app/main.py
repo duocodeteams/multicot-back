@@ -18,7 +18,9 @@ if settings.environment == "development":
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    create_db_and_tables()
+    # En producción el esquema lo define Alembic; create_all aquí chocaría con las migraciones (ENUMs duplicados).
+    if settings.environment == "development":
+        create_db_and_tables()
     yield
 
 
