@@ -20,7 +20,7 @@ _PROVIDERS = [
     TerrawindQuoteProvider(),
     NewTravelQuoteProvider(),
     InterAssistQuoteProvider(),
-    UniversalQuoteProvider(),
+    # UniversalQuoteProvider(),
 ]
 
 

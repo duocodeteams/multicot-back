@@ -1,10 +1,10 @@
 @interassistBaseUrl = https://api-staging.interassist.com
-@interassistToken = 401|tcxEOi7uAMBpaMrm41PZplYrnbqMxg13jsE6FIE1ae0fac73
+@interassistToken = sk_live_U8SrWfqErQGSDR6p0zTaedEvZ6mH0VZBvuPrPT7XfR4NnnwQfLXuIL47dayz
 
 @appBaseUrl = http://localhost:8000
 @appEmail = admin@test.com
 @appPassword = password123
-@appToken = eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxIiwiZW1haWwiOiJhZG1pbkB0ZXN0LmNvbSIsInJvbGUiOiJhZG1pbiIsImFnZW5jeV9pZCI6bnVsbCwiZXhwIjoxNzg2NjI2ODYzfQ.UgNMKA8aMlVLVZEbxPXaBDagY90SRBYNfyNLd3QggZs
+@appToken = eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxIiwiZW1haWwiOiJhZG1pbkB0ZXN0LmNvbSIsInJvbGUiOiJhZG1pbiIsImFnZW5jeV9pZCI6bnVsbCwiZXhwIjoxNzg3MjMwODA1fQ.YVOLNr48CVqW83VSXczHPjqJm7RfVtI4JeBsvZ9dxvY
 
 ### Inter Assist — listar planes (API externa)
 GET {{interassistBaseUrl}}/api/planes?page=1

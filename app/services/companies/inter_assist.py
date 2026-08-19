@@ -57,26 +57,22 @@ class InterAssistQuoteProvider:
 
     def get_quotes(self, request: QuoteRequest) -> list[QuotePlan]:
         settings = self._settings
+        print(f"[InterAssist DEBUG] get_quotes called. api_key set: {bool(settings.interassist_api_key)}, base_url: {settings.interassist_base_url}")
         if not settings.interassist_api_key:
-            logger.debug("InterAssist: sin INTERASSIST_API_KEY configurado")
+            print("[InterAssist DEBUG] SIN API KEY → return []")
             return []
 
         destino_id = _DESTINATION_TO_INTERASSIST.get(request.destination_id)
         if destino_id is None:
-            logger.debug(
-                "InterAssist: destination_id=%s sin mapeo (Nacional no soportado)",
-                request.destination_id,
-            )
+            print(f"[InterAssist DEBUG] destination_id={request.destination_id} sin mapeo → return []")
             return []
 
         if request.origin != "AR":
-            logger.debug(
-                "InterAssist: origen '%s' no soportado (solo AR)",
-                request.origin,
-            )
+            print(f"[InterAssist DEBUG] origin='{request.origin}' no soportado → return []")
             return []
 
         trip_days = (request.return_date - request.departure_date).days + 1
+        print(f"[InterAssist DEBUG] trip_days={trip_days}, trip_type={request.trip_type}, ages={request.ages}, destino_id={destino_id}")
         if trip_days < 1:
             return []
 
@@ -89,16 +85,28 @@ class InterAssistQuoteProvider:
         with httpx.Client(timeout=30.0) as client:
             try:
                 raw_plans = self._fetch_all_plans(client, base_url, headers)
-            except httpx.HTTPError:
+            except httpx.HTTPError as e:
+                print(f"[InterAssist DEBUG] error HTTP obteniendo planes: {e}")
                 logger.exception("InterAssist: error HTTP obteniendo planes")
                 return []
-            except Exception:
+            except Exception as e:
+                print(f"[InterAssist DEBUG] error inesperado obteniendo planes: {e}")
                 logger.exception("InterAssist: error inesperado obteniendo planes")
                 return []
 
+        print(f"[InterAssist DEBUG] raw_plans obtenidos: {len(raw_plans)}")
+
         pais_id = settings.interassist_pais_argentina_id
         plans: list[QuotePlan] = []
+        skipped_inactive = 0
+        skipped_destino = 0
+        skipped_pais = 0
+        skipped_edad = 0
+        skipped_precio = 0
+        skipped_error = 0
         for raw in raw_plans:
+            plan_id = (raw or {}).get("id")
+            plan_name = (raw or {}).get("nombre", "?")
             try:
                 plan = self._plan_to_quote_plan(
                     raw=raw,
@@ -107,22 +115,36 @@ class InterAssistQuoteProvider:
                     pais_id=pais_id,
                     trip_days=trip_days,
                 )
-            except Exception:
-                logger.exception(
-                    "InterAssist: error armando plan id=%s",
-                    (raw or {}).get("id"),
-                )
+            except Exception as e:
+                print(f"[InterAssist DEBUG] EXCEPCION plan id={plan_id} name='{plan_name}': {e}")
+                skipped_error += 1
                 continue
             if plan:
                 plans.append(plan)
+            else:
+                # Detectar motivo del descarte
+                if not raw.get("activo", True):
+                    skipped_inactive += 1
+                elif not self._matches_destino(raw, destino_id):
+                    skipped_destino += 1
+                elif not self._matches_pais(raw, pais_id):
+                    skipped_pais += 1
+                elif raw.get("edad_maxima") is not None:
+                    try:
+                        max_age = int(raw["edad_maxima"])
+                        if any(age > max_age for age in request.ages):
+                            skipped_edad += 1
+                        else:
+                            skipped_precio += 1
+                    except (TypeError, ValueError):
+                        skipped_precio += 1
+                else:
+                    skipped_precio += 1
 
-        logger.debug(
-            "InterAssist: quote end ok plans=%s/%s destino_id=%s days=%s trip_type=%s",
-            len(plans),
-            len(raw_plans),
-            destino_id,
-            trip_days,
-            request.trip_type,
+        print(
+            f"[InterAssist DEBUG] RESULTADO: {len(plans)} planes ok de {len(raw_plans)} totales. "
+            f"Descartados → inactivo={skipped_inactive} destino={skipped_destino} "
+            f"pais={skipped_pais} edad={skipped_edad} precio={skipped_precio} error={skipped_error}"
         )
         return plans
 
@@ -137,12 +159,16 @@ class InterAssistQuoteProvider:
         last_page: int | None = None
 
         while page <= _MAX_PAGES:
+            url = f"{base_url}/api/planes"
+            print(f"[InterAssist DEBUG] GET {url}?page={page}")
             response = client.get(
-                f"{base_url}/api/planes",
+                url,
                 headers=headers,
                 params={"page": page},
             )
+            print(f"[InterAssist DEBUG] HTTP {response.status_code} (page={page}), content-length={len(response.text)}")
             if response.status_code >= 400:
+                print(f"[InterAssist DEBUG] ERROR body: {response.text[:500]}")
                 logger.error(
                     "InterAssist: GET /api/planes page=%s HTTP %s - body=%s",
                     page,
@@ -153,6 +179,7 @@ class InterAssistQuoteProvider:
             payload = response.json()
 
             page_items, detected_last = self._extract_page(payload)
+            print(f"[InterAssist DEBUG] page={page}: items={len(page_items)}, last_page={detected_last}")
             if not page_items:
                 break
 
@@ -241,13 +268,22 @@ class InterAssistQuoteProvider:
         plan_name = str(raw.get("nombre") or "").strip() or str(plan_id)
         benefits = self._extract_benefits(raw)
         coverage_amount = self._extract_coverage(raw, benefits)
-        exchange_rate = self._parse_decimal(raw.get("local_currency_conversion")) or Decimal("1")
-        if exchange_rate <= 0:
-            exchange_rate = Decimal("1")
-
         final_rate_usd = total.quantize(Decimal("0.01"))
-        final_rate = (final_rate_usd * exchange_rate).quantize(Decimal("0.01"))
-        net_rate = final_rate_usd
+
+        # La tarifa del plan está en la moneda indicada por "moneda" (ej. Dólar).
+        # local_currency_conversion funciona como TC a moneda local cuando > 1.
+        # Patrón idéntico a Cardinal/GoAssistance/Terrawind:
+        #   - Si hay TC válido → final_rate = USD * TC (moneda local), exchange_rate = TC
+        #   - Si no hay TC     → final_rate = USD, exchange_rate = 1
+        lcc = self._parse_decimal(raw.get("local_currency_conversion"))
+        if lcc is not None and lcc > 1:
+            exchange_rate = lcc.quantize(Decimal("0.0001"))
+            final_rate = (final_rate_usd * exchange_rate).quantize(Decimal("0.01"))
+            net_rate = final_rate
+        else:
+            exchange_rate = Decimal("1")
+            final_rate = final_rate_usd
+            net_rate = final_rate_usd
 
         return QuotePlan(
             company=self.company_name,
