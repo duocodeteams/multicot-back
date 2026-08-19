@@ -92,6 +92,20 @@ class Settings(BaseSettings):
     universal_tipo_viaje_multiviaje: str = "Varios viajes"
     universal_tipo_viaje_larga_estadia: str = ""
 
+    # Omint Assistance (B2B CreateQuotationB2B) — PROD
+    omint_token_url: str = "https://core.omintassistance.com.ar/connect/token"
+    omint_quote_url: str = (
+        "https://api.omintassistance.com.ar/Quotation/CreateQuotationB2B"
+    )
+    omint_client_id: str = ""
+    omint_client_secret: str = ""
+    omint_scope: str = "OACoreApi IntegrationWebApi"
+    # Opcionales: el token ya resuelve el acuerdo; solo enviar si hace falta.
+    omint_agreement_number: int | None = None
+    omint_market_id: str = ""
+    # Días máx. por viaje en planes anuales (30 | 45 | 60)
+    omint_annual_quantity_of_days: int = 30
+
 
 def get_cardinal_destino_ids(settings: Settings) -> dict[int, int]:
     """Diccionario destination_id (1-5) → Cardinal destinoId. Solo incluye los configurados."""

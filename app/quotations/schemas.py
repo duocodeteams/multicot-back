@@ -87,7 +87,10 @@ class QuotePlan(BaseModel):
     coverage_amount: Decimal = Field(..., description="Monto de cobertura (Tope Máximo Global)")
     benefits: list[Benefit] = Field(default_factory=list, description="Prestaciones del plan")
     net_rate: Decimal = Field(..., description="Tarifa neta (final_rate_usd menos comisión)")
-    final_rate_usd: Decimal = Field(..., description="Tarifa final USD")
+    final_rate_usd: Decimal | None = Field(
+        default=None,
+        description="Tarifa final USD (null si la compañía no informa USD)",
+    )
     exchange_rate: Decimal = Field(..., description="Tasa de cambio")
     final_rate: Decimal = Field(..., description="Tarifa final")
     # Promociones / precio de lista (opcionales; no todas las compañías lo informan).
