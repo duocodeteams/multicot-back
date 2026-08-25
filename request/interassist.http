@@ -11,6 +11,46 @@ GET {{interassistBaseUrl}}/api/planes?page=1
 Accept: application/json
 Authorization: Bearer {{interassistToken}}
 
+### Inter Assist — detalle de un plan
+GET {{interassistBaseUrl}}/api/planes?id=1679
+Accept: application/json
+Authorization: Bearer {{interassistToken}}
+
+### Inter Assist — promociones por emisión (candidato a resolver IDs)
+# Los planes traen "promociones": [127, ...] — este endpoint debería devolver el detalle.
+# Si falla el body, probar variantes abajo según el error 422.
+POST {{interassistBaseUrl}}/api/ventas/promocionesemision
+Accept: application/json
+Authorization: Bearer {{interassistToken}}
+Content-Type: application/json
+
+{
+  "empresa_id": 927,
+  "tipo_emision": 0
+}
+
+### Inter Assist — promocionesemision (variante con plan)
+POST {{interassistBaseUrl}}/api/ventas/promocionesemision
+Accept: application/json
+Authorization: Bearer {{interassistToken}}
+Content-Type: application/json
+
+{
+  "empresa_id": 927,
+  "plan_id": 881,
+  "tipo_emision": 0
+}
+
+### Inter Assist — intentar GET promo por ID (si existe catálogo)
+GET {{interassistBaseUrl}}/api/promociones/127
+Accept: application/json
+Authorization: Bearer {{interassistToken}}
+
+### Inter Assist — listar promociones (si existe)
+GET {{interassistBaseUrl}}/api/promociones
+Accept: application/json
+Authorization: Bearer {{interassistToken}}
+
 ### App — login
 POST {{appBaseUrl}}/v1/auth/login
 Content-Type: application/json
@@ -21,7 +61,7 @@ Accept: application/json
   "password": "{{appPassword}}"
 }
 
-### App — cotizar (incluye Inter Assist)
+### App — cotizar unico_viaje (incluye Inter Assist)
 POST {{appBaseUrl}}/v1/quotes
 Authorization: Bearer {{appToken}}
 Content-Type: application/json
@@ -34,4 +74,19 @@ Accept: application/json
   "origin": "AR",
   "destination_id": 2,
   "trip_type": "unico_viaje"
+}
+
+### App — cotizar multiviaje (Inter Assist usa _30_dias_anual)
+POST {{appBaseUrl}}/v1/quotes
+Authorization: Bearer {{appToken}}
+Content-Type: application/json
+Accept: application/json
+
+{
+  "departure_date": "2026-09-01",
+  "return_date": "2027-08-31",
+  "ages": [30],
+  "origin": "AR",
+  "destination_id": 2,
+  "trip_type": "multiviaje"
 }
