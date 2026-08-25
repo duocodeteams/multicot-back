@@ -1,0 +1,73 @@
+@base_url = http://localhost:8000
+@token = reemplazar
+
+### login admin
+POST {{base_url}}/v1/auth/login
+Content-Type: application/json
+
+{
+  "email": "admin@test.com ",
+  "password": "password123"
+}
+
+### listar compañías
+GET {{base_url}}/v1/companies
+Authorization: Bearer {{token}}
+
+### desactivar compañía
+PATCH {{base_url}}/v1/companies/1
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{
+  "active": false
+}
+
+### crear plan (destinos nacen apagados)
+POST {{base_url}}/v1/plans
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{
+  "company_id": 2,
+  "external_plan_id": "5066",
+  "name": "CARDINAL 50"
+}
+
+### listar planes
+GET {{base_url}}/v1/plans
+Authorization: Bearer {{token}}
+
+### habilitar destinos
+PATCH {{base_url}}/v1/plans/1
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{
+  "destinations": [
+    {"destination_id": 1, "enabled": false},
+    {"destination_id": 2, "enabled": true},
+    {"destination_id": 3, "enabled": true},
+    {"destination_id": 4, "enabled": true},
+    {"destination_id": 5, "enabled": false}
+  ]
+}
+### habilitar destinos y markup
+PATCH {{base_url}}/v1/plans/1
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{
+  "markup": 15,
+  "destinations": [
+    {"destination_id": 1, "enabled": false},
+    {"destination_id": 2, "enabled": true},
+    {"destination_id": 3, "enabled": true},
+    {"destination_id": 4, "enabled": true},
+    {"destination_id": 5, "enabled": false}
+  ]
+}
+
+### baja lógica
+DELETE {{base_url}}/v1/plans/1
+Authorization: Bearer {{token}}
