@@ -49,6 +49,7 @@ _TRIP_TYPE_MAP: dict[str, str] = {
 
 class PaxQuoteProvider:
     company_name = "Pax"
+    company_slug = "pax"
 
     def __init__(self) -> None:
         self._settings = get_settings()

@@ -1,6 +1,7 @@
 """Adaptador para Terrawind (SETW): cotización de planes en lote.
 
-Precios en get_voucher_price: price en USD; local_price en moneda local (ej. ARS); tc = tipo de cambio.
+SETW devuelve tarifas netas: price (USD) y local_price = price × tc (ARS).
+comission_price llega siempre en 0; no se resta.
 """
 
 import logging
@@ -18,6 +19,7 @@ logger = logging.getLogger(__name__)
 
 class TerrawindQuoteProvider:
     company_name = "Terrawind"
+    company_slug = "terrawind"
 
     def __init__(self) -> None:
         self._settings = get_settings()
@@ -43,7 +45,7 @@ class TerrawindQuoteProvider:
             if not products:
                 return []
 
-            # TODO: filtrar manualmente por IDs/nombres de planes habilitados.
+            # El catálogo local (plans + plan_destinations) filtra después en quote_service.
             for product in products:
                 try:
                     plan = self._quote_product(
@@ -82,13 +84,11 @@ class TerrawindQuoteProvider:
         if not price_data:
             return None
 
+        # price y local_price son la misma tarifa neta (USD vs ARS). No restar comisión.
         final_rate_usd = self._parse_decimal(price_data.get("price"))
         if final_rate_usd is None:
             logger.debug("Terrawind: plan %s sin price parseable", product_id)
             return None
-
-        commission = self._parse_decimal(price_data.get("comission_price")) or Decimal("0")
-        net_usd = (final_rate_usd - commission).quantize(Decimal("0.01"))
 
         local_price = self._parse_decimal(price_data.get("local_price"))
         tc = self._parse_decimal(price_data.get("tc"))
@@ -97,17 +97,15 @@ class TerrawindQuoteProvider:
             final_rate = local_price.quantize(Decimal("0.01"))
             if tc is not None:
                 exchange_rate = tc.quantize(Decimal("0.0001"))
-                net_rate = (net_usd * tc).quantize(Decimal("0.01"))
             elif final_rate_usd > 0:
                 exchange_rate = (local_price / final_rate_usd).quantize(Decimal("0.0001"))
-                net_rate = (net_usd * exchange_rate).quantize(Decimal("0.01"))
             else:
                 exchange_rate = Decimal("1")
-                net_rate = net_usd
         else:
             final_rate = final_rate_usd
             exchange_rate = Decimal("1")
-            net_rate = net_usd
+
+        net_rate = final_rate
 
         coverage_amount = self._extract_coverage_from_benefits(benefits)
 

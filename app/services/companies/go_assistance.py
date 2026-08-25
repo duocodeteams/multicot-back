@@ -31,6 +31,7 @@ TIPO_VIAJE_PLACER = 1  # Por ahora siempre Placer
 
 class GoAssistanceQuoteProvider:
     company_name = "GoAssistance"
+    company_slug = "go_assistance"
 
     def __init__(self) -> None:
         self._settings = get_settings()
