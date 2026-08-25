@@ -27,6 +27,7 @@ _SOAP_ACTION = "document/http://siebel.com/CustomUI:LeadCotizadorOper"
 
 class UniversalQuoteProvider:
     company_name = "Universal"
+    company_slug = "universal"
 
     def __init__(self) -> None:
         self._settings = get_settings()

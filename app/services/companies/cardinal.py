@@ -28,6 +28,7 @@ MAX_DIAS_CORRIDOS_ANUAL = 30
 
 class CardinalQuoteProvider:
     company_name = "Cardinal"
+    company_slug = "cardinal"
 
     def __init__(self) -> None:
         self._settings = get_settings()

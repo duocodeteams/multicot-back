@@ -61,6 +61,7 @@ _DAILY_KEY_RE_86 = re.compile(r"^_(\d+)_dias_86$")
 
 class InterAssistQuoteProvider:
     company_name = "Inter Assist"
+    company_slug = "inter_assist"
 
     def __init__(self) -> None:
         self._settings = get_settings()

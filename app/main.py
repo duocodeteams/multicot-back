@@ -4,9 +4,12 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
+from sqlmodel import Session
+
 from app.api.v1.router import router
+from app.companies.seed import seed_companies
 from app.core.config import settings
-from app.core.database import create_db_and_tables
+from app.core.database import create_db_and_tables, engine
 
 # En desarrollo, mostrar todos los logs (DEBUG) para depuración.
 if settings.environment == "development":
@@ -21,6 +24,8 @@ async def lifespan(app: FastAPI):
     # En producción el esquema lo define Alembic; create_all aquí chocaría con las migraciones (ENUMs duplicados).
     if settings.environment == "development":
         create_db_and_tables()
+    with Session(engine) as session:
+        seed_companies(session)
     yield
 
 

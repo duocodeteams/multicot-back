@@ -1,6 +1,9 @@
-"""Orquestador: llama a todos los proveedores de cotización y unifica la respuesta."""
+"""Orquestador: llama a los proveedores activos y aplica catálogo (filtro + markup)."""
 import logging
 
+from sqlmodel import Session
+
+from app.plans.catalog import filter_and_markup_plans, load_catalogs
 from app.quotations.schemas import QuotePlan, QuoteRequest, QuoteResponse
 from app.services.companies.cardinal import CardinalQuoteProvider
 from app.services.companies.go_assistance import GoAssistanceQuoteProvider
@@ -15,7 +18,7 @@ from app.services.companies.universal import UniversalQuoteProvider
 logger = logging.getLogger(__name__)
 
 _PROVIDERS = [
-    # PaxQuoteProvider(),
+    PaxQuoteProvider(),
     CardinalQuoteProvider(),
     GoAssistanceQuoteProvider(),
     TerrawindQuoteProvider(),
@@ -26,16 +29,23 @@ _PROVIDERS = [
 ]
 
 
-def get_quotes(request: QuoteRequest) -> QuoteResponse:
+def get_quotes(session: Session, request: QuoteRequest) -> QuoteResponse:
     """
-    Obtiene cotizaciones de todas las compañías y las devuelve en formato unificado.
-    Por ahora las llamadas son secuenciales; más adelante se pueden paralelizar.
+    Obtiene cotizaciones de las compañías activas y las devuelve unificadas.
+    El catálogo local filtra por destino y aplica markup cuando hay planes cargados.
     """
+    catalogs = load_catalogs(session)
     all_plans: list[QuotePlan] = []
     for provider in _PROVIDERS:
+        catalog = catalogs.get(provider.company_slug)
+        if catalog is None or not catalog.company.active:
+            logger.debug(
+                "Proveedor %s omitido: compañía inactiva o sin seed",
+                provider.company_slug,
+            )
+            continue
         try:
             plans = provider.get_quotes(request)
-            all_plans.extend(plans)
         except Exception as exc:
             logger.warning(
                 "Proveedor %s falló: %s",
@@ -44,4 +54,6 @@ def get_quotes(request: QuoteRequest) -> QuoteResponse:
                 exc_info=True,
             )
             continue
+        plans = filter_and_markup_plans(catalog, request.destination_id, plans)
+        all_plans.extend(plans)
     return QuoteResponse(plans=all_plans)
