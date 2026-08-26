@@ -1,0 +1,98 @@
+### Cardinal Assistance (Evoucher 2) — requests crudos
+### Docs: https://evoucher.cardinalassistance.com/docs/doc.html
+###
+### Destinos (.env):
+###   16=Nacional, 3=Latinoamérica, 8=Europa, 9=Resto del mundo, 12=Norteamérica
+
+@base_url = https://evoucher.cardinalassistance.com/webservice
+# Producción:
+# @base_url = https://evoucher.cardinalassistance.com/webservice
+
+@agente_emisor_guid = 52fc1910575c47b2c353d53c0f24035a
+@email = info@biantravel.com
+
+# Pegá acá el id de "Argentina" de la respuesta de /parametros origenes
+@origen_id = 6
+
+
+### 1) Parámetros — origenes
+POST {{base_url}}/parametros
+Content-Type: application/json
+
+{
+  "agenteEmisorGuid": "{{agente_emisor_guid}}",
+  "parametros": "origenes",
+  "localeId": 1
+}
+
+### 2) Parámetros — destinos
+POST {{base_url}}/parametros
+Content-Type: application/json
+
+{
+  "agenteEmisorGuid": "{{agente_emisor_guid}}",
+  "parametros": "destinos",
+  "localeId": 1
+}
+
+### 3) Parámetros — monedas
+POST {{base_url}}/parametros
+Content-Type: application/json
+
+{
+  "agenteEmisorGuid": "{{agente_emisor_guid}}",
+  "parametros": "monedas",
+  "localeId": 1
+}
+
+### 4) Cotizar — viaje único (Europa)
+POST {{base_url}}/cotizar
+Content-Type: application/json
+
+{
+  "agenteEmisorGuid": "{{agente_emisor_guid}}",
+  "origenId": {{origen_id}},
+  "destinoId": 8,
+  "fechaSalida": "2026-09-01",
+  "fechaRegreso": "2026-09-15",
+  "edades": [30, 28],
+  "tarifaAnual": false,
+  "email": "{{email}}",
+  "localeId": 1,
+  "prestaciones": "cotizador"
+}
+
+### 5) Cotizar — viaje único (Latinoamérica)
+POST {{base_url}}/cotizar
+Content-Type: application/json
+
+{
+  "agenteEmisorGuid": "{{agente_emisor_guid}}",
+  "origenId": {{origen_id}},
+  "destinoId": 3,
+  "fechaSalida": "2026-09-01",
+  "fechaRegreso": "2026-09-10",
+  "edades": [35],
+  "tarifaAnual": false,
+  "email": "{{email}}",
+  "localeId": 1,
+  "prestaciones": "cotizador"
+}
+
+### 6) Cotizar — multiviaje (maxDiasCorridos=30)
+POST {{base_url}}/cotizar
+Content-Type: application/json
+
+{
+  "agenteEmisorGuid": "{{agente_emisor_guid}}",
+  "origenId": {{origen_id}},
+  "destinoId": 8,
+  "fechaSalida": "2026-09-01",
+  "fechaRegreso": "2027-08-31",
+  "edades": [30],
+  "tarifaAnual": true,
+  "maxDiasCorridos": 30,
+  "email": "{{email}}",
+  "localeId": 1,
+  "prestaciones": "cotizador"
+}

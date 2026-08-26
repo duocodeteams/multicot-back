@@ -3,3 +3,4 @@ __pycache__/
 .env
 cotizador.db
 universal-prod.http
+docs/
