@@ -1,0 +1,28 @@
+@base_url = http://localhost:8000
+
+### login user
+POST {{base_url}}/v1/auth/login
+Content-Type: application/json
+
+{
+  "email": "admin@test.com ",
+  "password": "password123"
+}
+
+@token = reemplazar
+
+###  COTIZAR
+POST {{base_url}}/v1/quotes
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{
+  "departure_date": "2026-09-11",
+  "return_date": "2026-09-20",
+  "ages": [
+    30
+  ],
+  "origin": "AR",
+  "destination_id": 2,
+  "trip_type": "unico_viaje"
+}

@@ -1,7 +1,7 @@
 from sqlmodel import Session, create_engine
 
 from app.core.config import settings
-from app.models import Agency, Seller, User  # noqa: F401 - registra los modelos en metadata
+from app.models import Agency, Company, Plan, PlanDestination, Seller, User  # noqa: F401 - registra los modelos en metadata
 
 engine = create_engine(
     settings.database_url,

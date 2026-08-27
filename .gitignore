@@ -2,3 +2,5 @@
 __pycache__/
 .env
 cotizador.db
+universal-prod.http
+scripts/products_multi.csv

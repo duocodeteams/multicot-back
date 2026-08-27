@@ -35,6 +35,7 @@ _DESTINATION_TO_TERRITORY: dict[int, str] = {
 
 class NewTravelQuoteProvider:
     company_name = "New Travel"
+    company_slug = "new_travel"
 
     def __init__(self) -> None:
         self._settings = get_settings()
