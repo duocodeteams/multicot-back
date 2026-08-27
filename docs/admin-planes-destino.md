@@ -31,6 +31,7 @@ Seed inicial:
 | `new_travel` | New Travel | `true` |
 | `inter_assist` | Inter Assist | `true` |
 | `universal` | Universal | `true` |
+| `omint` | Omint | `true` |
 
 El seed es idempotente por `slug`: no pisa un `active` que el admin ya haya cambiado.
 
