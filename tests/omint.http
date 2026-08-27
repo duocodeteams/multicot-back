@@ -1,0 +1,106 @@
+### Omint Assistance — B2B CreateQuotationB2B
+### Ambiente activo: PRODUCCIÓN (TEST Azure no valida el token — OpenIddict ID2170)
+
+@token_url = https://core.omintassistance.com.ar/connect/token
+@quote_url = https://api.omintassistance.com.ar/Quotation/CreateQuotationB2B
+# TEST (no usable por ahora):
+# @quote_url = https://oaapp.eastus2.cloudapp.azure.com:8448/Quotation/CreateQuotationB2B
+
+@client_id = d726211e-5dee-4421-8692-242a66c3882b
+@client_secret = 10c3dd8387cd101faa159558d8540cc9
+@scope = OACoreApi IntegrationWebApi
+
+@agreement_number = 3308
+@market_id = 2e455727-2099-469e-9e5d-a01a85072b1b
+
+# Pegá acá el access_token de la respuesta del request "get token" (vence en ~60 min)
+@access_token =
+
+
+### 1) get token (OAuth2 Client Credentials)
+# @name getToken
+POST {{token_url}}
+Content-Type: application/x-www-form-urlencoded
+
+grant_type=client_credentials&client_id={{client_id}}&client_secret={{client_secret}}&scope={{scope}}
+
+### 2) Cotización Simple — todos los productos tipo S
+POST {{quote_url}}
+Authorization: Bearer {{access_token}}
+Content-Type: application/json
+
+{
+  "productTypeCode": "S",
+  "tariffTypeCode": "B",
+  "departureCode": "MAA",
+  "destinationCode": "ASU",
+  "dateSince": "2026-09-10T00:00:00Z",
+  "dateUntil": "2026-09-20T00:00:00Z",
+  "passengerAges": [35, 38],
+  "email": "info@biantravel.com",
+  "name": "Prueba Biant",
+  "phoneNumber": "+54911234567"
+}
+
+### 3) Cotización Simple — producto específico OA 30
+POST {{quote_url}}
+Authorization: Bearer {{access_token}}
+Content-Type: application/json
+
+{
+  "productCode": "PA-S-d030-Cov",
+  "tariffTypeCode": "B",
+  "departureCode": "MAA",
+  "destinationCode": "EMO",
+  "dateSince": "2026-09-10T00:00:00Z",
+  "dateUntil": "2026-09-20T00:00:00Z",
+  "passengerAges": [40],
+  "email": "info@biantravel.com"
+}
+
+### 4) Cotización Anual / Multiviaje
+# quantityOfDays obligatorio: 30 | 45 | 60
+POST {{quote_url}}
+Authorization: Bearer {{access_token}}
+Content-Type: application/json
+
+{
+  "productTypeCode": "A",
+  "tariffTypeCode": "B",
+  "quantityOfDays": 30,
+  "departureCode": "MAA",
+  "destinationCode": "ASU",
+  "dateSince": "2026-09-10T00:00:00Z",
+  "dateUntil": "2027-09-09T00:00:00Z",
+  "passengerAges": [35],
+  "email": "info@biantravel.com"
+}
+
+### 5) Cotización con agreementNumber + marketId
+POST {{quote_url}}
+Authorization: Bearer {{access_token}}
+Content-Type: application/json
+
+{
+  "agreementNumber": {{agreement_number}},
+  "marketId": "{{market_id}}",
+  "productTypeCode": "S",
+  "tariffTypeCode": "B",
+  "departureCode": "MAA",
+  "destinationCode": "NAC",
+  "dateSince": "2026-09-10T00:00:00Z",
+  "dateUntil": "2026-09-20T00:00:00Z",
+  "passengerAges": [25, 27, 50],
+  "email": "info@biantravel.com"
+}
+
+#
+# Códigos útiles (del manual)
+# Orígenes:  MAA = Argentina
+# Destinos:  ASU América del Sur | ARG Argentina | AAA Asia/África
+#            NAC EEUU/Canadá | EMO Europa/Medio Oriente | MAC México/Centro/Caribe
+#            MUC Multi-Continente | OCE Oceania | URU Uruguay
+# Productos: S Simple | A Anual | L Larga Estadía
+# Tarifa:    B = Bruto
+# Acuerdo:   3308 | Market Argentina: 2e455727-2099-469e-9e5d-a01a85072b1b
+#

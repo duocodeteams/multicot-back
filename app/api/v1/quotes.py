@@ -16,7 +16,7 @@ def create_quote(
     current_user: Annotated[User, Depends(get_current_user)],
 ) -> QuoteResponse:
     """
-    Cotiza con todas las compañías (Pax, Cardinal, Terrawind, New Travel, Inter Assist).
+    Cotiza con todas las compañías registradas (Cardinal, Go, New Travel, Inter Assist, Universal, Omint, etc.).
     Requiere autenticación.
     """
     return get_quotes(request)
