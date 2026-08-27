@@ -315,18 +315,19 @@ class InterAssistQuoteProvider:
 
         # La tarifa del plan está en la moneda indicada por "moneda" (ej. Dólar).
         # local_currency_conversion funciona como TC a moneda local cuando > 1.
-        # Patrón idéntico a Cardinal/GoAssistance/Terrawind:
-        #   - Si hay TC válido → final_rate = USD * TC (moneda local), exchange_rate = TC
-        #   - Si no hay TC     → final_rate = USD, exchange_rate = 1
+        #   - Si hay TC válido → final_rate = USD * TC (moneda local)
+        #   - Si no hay TC     → final_rate = USD
+        # Temporal: exchange_rate fijo en 2 (independiente del cálculo de final_rate).
         lcc = self._parse_decimal(raw.get("local_currency_conversion"))
         if lcc is not None and lcc > 1:
-            exchange_rate = lcc.quantize(Decimal("0.0001"))
-            final_rate = (final_rate_usd * exchange_rate).quantize(Decimal("0.01"))
+            final_rate = (final_rate_usd * lcc.quantize(Decimal("0.0001"))).quantize(
+                Decimal("0.01")
+            )
             net_rate = final_rate
         else:
-            exchange_rate = Decimal("1")
             final_rate = final_rate_usd
             net_rate = final_rate_usd
+        exchange_rate = Decimal("2")
 
         return QuotePlan(
             company=self.company_name,
