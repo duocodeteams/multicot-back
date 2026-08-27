@@ -65,6 +65,14 @@ class Settings(BaseSettings):
     new_travel_user: str = ""
     new_travel_password: str = ""
 
+    # Inter Assist (server-to-server API Key)
+    interassist_base_url: str = "https://api-staging.interassist.com"
+    interassist_api_key: str = ""
+    # País de origen Argentina en catálogo Inter Assist (GET /api/planes/empresas/{paisId})
+    interassist_pais_argentina_id: int = 14
+    # Multiviaje: días máximos corridos (como Cardinal maxDiasCorridos / Omint quantityOfDays).
+    interassist_annual_days: int = 30
+
     # Terrawind (SETW)
     terrawind_base_url: str = "https://sandbox.setw.net/emision/api/v2/"
     terrawind_user: str = ""

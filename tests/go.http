@@ -1,27 +1,267 @@
-### cotizar go assistance POST
-POST https://sistema.aseguratuviaje.com/webapi18/api/CotizacionSeguroViajero
+### Go Assistance — Cotización (crudo)
+### Manual: BIANT SEGUROS BROKER PAS
+### Portal: https://back.goassistance.com
+###
+### Flujo (OBLIGATORIO):
+###   1) Corré el POST del destino
+###   2) Copiá el "Token" de ESA respuesta a la variable @token_* de ese destino
+###   3) Corré el GET de ese mismo destino
+###   NO reuses el token de Europa/Latam para Nacional: cada POST genera un Token nuevo
+###
+### Destinos (PaisHasta):
+###   1009 Nacional  → acá aparece "GO! Nacional" (+ PET, algún Multitrip)
+###   1002 Latam     → catálogo internacional completo
+###   1004 Europa | 1000 Norteamerica | 1006 Resto mundo | 1001 América Central
+### PaisDesde Argentina = 32 | TipoViaje Placer = 1
+
+@base_url = https://back.goassistance.com/webapi18
+@email = info@biantravel.com
+@webservice = q7d4NEtvpItbDWMqZQ5cyJxY64cPkdi/YgQCjibvKcmu1s7cWVD1YNhRvNmrpoSxsAYE4CtxFFOzQXOAUoHRVA==
+
+# Tokens por destino (pegá el Token del POST correspondiente)
+@token_nacional = 8da35b8c-6991-4b7c-9f68-d81bf2cbcb6b
+@token_europa = de9bb462-e6b9-45a9-a0a1-8300f273d62c
+@token_latam = 9a5dd25f-0616-4cf8-9f69-39c2669c3006
+@token_norteamerica = 65b79614-8cbd-49d5-b40c-459f5adee57f
+@token_resto = dbc93f41-dad9-45bb-b022-1d742fe20b92
+@token_america_central = ee000510-bb6a-401e-bea1-00b2febaf47f
+@token_viaje_largo = 2bc5840f-b9e1-44f7-acc0-49ab455e82b2
+
+
+###############################################################################
+### NACIONAL (PaisHasta=1009) — plan "GO! Nacional"
+###############################################################################
+
+### 1) POST — Nacional
+# @name postNacional
+POST {{base_url}}/api/CotizacionSeguroViajero
 Content-Type: application/json
 
 {
-    "PaisDesde": 32,
-    "PaisHasta": 1004,
-    "TipoViaje": 1,
-    "FechaDesde": "2026-08-13",
-    "FechaHasta": "2026-08-20",
-    "Edad1": 22,
-    "Edad2": 0,
-    "Edad3": 0,
-    "Edad4": 0,
-    "Edad5": 0,
-    "Cultura": "es-ES",
-    "Email": "prueba@prueba.com",
-    "WebService": "q7d4NEtvpItbDWMqZQ5cyJxY64cPkdi%2FYgQCjibvKcmu1s7cWVD1YNhRvNmrpoSxsAYE4CtxFFOzQXOAUoHRVA%3D%3D",
-    "SemanaGestacion": 0,
-    "Source": "",
-    "Token": ""
+  "PaisDesde": 32,
+  "PaisHasta": 1009,
+  "TipoViaje": 1,
+  "FechaDesde": "2026-09-10",
+  "FechaHasta": "2026-09-20",
+  "Edad1": 30,
+  "Edad2": 0,
+  "Edad3": 0,
+  "Edad4": 0,
+  "Edad5": 0,
+  "Cultura": "es-ES",
+  "Email": "{{email}}",
+  "Telefono": "",
+  "WebService": "{{webservice}}",
+  "SemanaGestacion": 0,
+  "Source": "",
+  "Token": ""
 }
 
-@token = 4c7f7880-1b17-4a40-8618-e800128159c0
-### cotizar go assistance GET
-GET https://sistema.aseguratuviaje.com/webapi18/api/CotizacionSeguroViajero?token={{token}}&idseguro=0
+### 2) GET productos — Nacional (usar @token_nacional del POST 1)
+GET {{base_url}}/api/CotizacionSeguroViajero?token={{token_nacional}}&idseguro=0
 
+###############################################################################
+### EUROPA (1004)
+###############################################################################
+
+### 3) POST — Europa
+# @name postEuropa
+POST {{base_url}}/api/CotizacionSeguroViajero
+Content-Type: application/json
+
+{
+  "PaisDesde": 32,
+  "PaisHasta": 1004,
+  "TipoViaje": 1,
+  "FechaDesde": "2026-09-10",
+  "FechaHasta": "2026-09-20",
+  "Edad1": 30,
+  "Edad2": 28,
+  "Edad3": 0,
+  "Edad4": 0,
+  "Edad5": 0,
+  "Cultura": "es-ES",
+  "Email": "{{email}}",
+  "Telefono": "",
+  "WebService": "{{webservice}}",
+  "SemanaGestacion": 0,
+  "Source": "",
+  "Token": ""
+}
+
+### 4) GET productos — Europa
+GET {{base_url}}/api/CotizacionSeguroViajero?token={{token_europa}}&idseguro=0
+
+###############################################################################
+### LATAM / América del Sur (1002)
+###############################################################################
+
+### 5) POST — Latinoamérica
+# @name postLatam
+POST {{base_url}}/api/CotizacionSeguroViajero
+Content-Type: application/json
+
+{
+  "PaisDesde": 32,
+  "PaisHasta": 1002,
+  "TipoViaje": 1,
+  "FechaDesde": "2026-09-10",
+  "FechaHasta": "2026-09-20",
+  "Edad1": 35,
+  "Edad2": 0,
+  "Edad3": 0,
+  "Edad4": 0,
+  "Edad5": 0,
+  "Cultura": "es-ES",
+  "Email": "{{email}}",
+  "Telefono": "",
+  "WebService": "{{webservice}}",
+  "SemanaGestacion": 0,
+  "Source": "",
+  "Token": ""
+}
+
+### 6) GET productos — Latam
+GET {{base_url}}/api/CotizacionSeguroViajero?token={{token_latam}}&idseguro=0
+
+###############################################################################
+### NORTEAMÉRICA (1000)
+###############################################################################
+
+### 7) POST — Norteamérica
+# @name postNorteamerica
+POST {{base_url}}/api/CotizacionSeguroViajero
+Content-Type: application/json
+
+{
+  "PaisDesde": 32,
+  "PaisHasta": 1000,
+  "TipoViaje": 1,
+  "FechaDesde": "2026-09-10",
+  "FechaHasta": "2026-09-20",
+  "Edad1": 30,
+  "Edad2": 0,
+  "Edad3": 0,
+  "Edad4": 0,
+  "Edad5": 0,
+  "Cultura": "es-ES",
+  "Email": "{{email}}",
+  "Telefono": "",
+  "WebService": "{{webservice}}",
+  "SemanaGestacion": 0,
+  "Source": "",
+  "Token": ""
+}
+
+### 8) GET productos — Norteamérica
+GET {{base_url}}/api/CotizacionSeguroViajero?token={{token_norteamerica}}&idseguro=0
+
+###############################################################################
+### RESTO DEL MUNDO (1006)
+###############################################################################
+
+### 9) POST — Resto del mundo
+# @name postRestoMundo
+POST {{base_url}}/api/CotizacionSeguroViajero
+Content-Type: application/json
+
+{
+  "PaisDesde": 32,
+  "PaisHasta": 1006,
+  "TipoViaje": 1,
+  "FechaDesde": "2026-09-10",
+  "FechaHasta": "2026-09-20",
+  "Edad1": 30,
+  "Edad2": 0,
+  "Edad3": 0,
+  "Edad4": 0,
+  "Edad5": 0,
+  "Cultura": "es-ES",
+  "Email": "{{email}}",
+  "Telefono": "",
+  "WebService": "{{webservice}}",
+  "SemanaGestacion": 0,
+  "Source": "",
+  "Token": ""
+}
+
+### 10) GET productos — Resto del mundo
+GET {{base_url}}/api/CotizacionSeguroViajero?token={{token_resto}}&idseguro=0
+
+###############################################################################
+### AMÉRICA CENTRAL (1001)
+###############################################################################
+
+### 11) POST — América Central
+# @name postAmericaCentral
+POST {{base_url}}/api/CotizacionSeguroViajero
+Content-Type: application/json
+
+{
+  "PaisDesde": 32,
+  "PaisHasta": 1001,
+  "TipoViaje": 1,
+  "FechaDesde": "2026-09-10",
+  "FechaHasta": "2026-09-20",
+  "Edad1": 30,
+  "Edad2": 0,
+  "Edad3": 0,
+  "Edad4": 0,
+  "Edad5": 0,
+  "Cultura": "es-ES",
+  "Email": "{{email}}",
+  "Telefono": "",
+  "WebService": "{{webservice}}",
+  "SemanaGestacion": 0,
+  "Source": "",
+  "Token": ""
+}
+
+### 12) GET productos — América Central
+GET {{base_url}}/api/CotizacionSeguroViajero?token={{token_america_central}}&idseguro=0
+
+###############################################################################
+### VIAJE LARGO (~6 meses) — Europa
+###############################################################################
+
+### 13) POST — viaje largo
+POST {{base_url}}/api/CotizacionSeguroViajero
+Content-Type: application/json
+
+{
+  "PaisDesde": 32,
+  "PaisHasta": 1004,
+  "TipoViaje": 1,
+  "FechaDesde": "2026-09-10",
+  "FechaHasta": "2027-03-10",
+  "Edad1": 30,
+  "Edad2": 0,
+  "Edad3": 0,
+  "Edad4": 0,
+  "Edad5": 0,
+  "Cultura": "es-ES",
+  "Email": "{{email}}",
+  "Telefono": "",
+  "WebService": "{{webservice}}",
+  "SemanaGestacion": 0,
+  "Source": "",
+  "Token": ""
+}
+
+### 14) GET productos — viaje largo
+GET {{base_url}}/api/CotizacionSeguroViajero?token={{token_viaje_largo}}&idseguro=0
+
+### 15) POST Coberturas — idseguro = ProductoId del GET
+POST {{base_url}}/api/Cobertura
+Content-Type: application/json
+
+{
+  "idseguros": [19355],
+  "idcultura": "es-ES"
+}
+
+#
+# Nacional verificado: PaisHasta=1009 → GO! Nacional (ProductoId 19355), PET, Multitrip
+# Latam 1002 → catálogo internacional (365, Adventure, Smart, etc.)
+# PaisHasta=32 (código país AR) → ERROR, no usar
+#

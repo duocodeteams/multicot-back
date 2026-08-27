@@ -92,7 +92,10 @@ class QuotePlan(BaseModel):
         default=None,
         description="Tarifa final USD (null si la compañía no informa USD)",
     )
-    exchange_rate: Decimal = Field(..., description="Tasa de cambio")
+    exchange_rate: Decimal | None = Field(
+        default=None,
+        description="Tasa de cambio (null si la compañía no informa TC)",
+    )
     final_rate: Decimal = Field(..., description="Tarifa final")
     markup: Decimal = Field(
         default=Decimal("0"),

@@ -1,0 +1,92 @@
+@interassistBaseUrl = https://api-staging.interassist.com
+@interassistToken = sk_live_U8SrWfqErQGSDR6p0zTaedEvZ6mH0VZBvuPrPT7XfR4NnnwQfLXuIL47dayz
+
+@appBaseUrl = http://localhost:8000
+@appEmail = admin@test.com
+@appPassword = password123
+@appToken = eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxIiwiZW1haWwiOiJhZG1pbkB0ZXN0LmNvbSIsInJvbGUiOiJhZG1pbiIsImFnZW5jeV9pZCI6bnVsbCwiZXhwIjoxNzg3MjMwODA1fQ.YVOLNr48CVqW83VSXczHPjqJm7RfVtI4JeBsvZ9dxvY
+
+### Inter Assist — listar planes (API externa)
+GET {{interassistBaseUrl}}/api/planes?page=1
+Accept: application/json
+Authorization: Bearer {{interassistToken}}
+
+### Inter Assist — detalle de un plan
+GET {{interassistBaseUrl}}/api/planes?id=1679
+Accept: application/json
+Authorization: Bearer {{interassistToken}}
+
+### Inter Assist — promociones por emisión (candidato a resolver IDs)
+# Los planes traen "promociones": [127, ...] — este endpoint debería devolver el detalle.
+# Si falla el body, probar variantes abajo según el error 422.
+POST {{interassistBaseUrl}}/api/ventas/promocionesemision
+Accept: application/json
+Authorization: Bearer {{interassistToken}}
+Content-Type: application/json
+
+{
+  "empresa_id": 927,
+  "tipo_emision": 0
+}
+
+### Inter Assist — promocionesemision (variante con plan)
+POST {{interassistBaseUrl}}/api/ventas/promocionesemision
+Accept: application/json
+Authorization: Bearer {{interassistToken}}
+Content-Type: application/json
+
+{
+  "empresa_id": 927,
+  "plan_id": 881,
+  "tipo_emision": 0
+}
+
+### Inter Assist — intentar GET promo por ID (si existe catálogo)
+GET {{interassistBaseUrl}}/api/promociones/127
+Accept: application/json
+Authorization: Bearer {{interassistToken}}
+
+### Inter Assist — listar promociones (si existe)
+GET {{interassistBaseUrl}}/api/promociones
+Accept: application/json
+Authorization: Bearer {{interassistToken}}
+
+### App — login
+POST {{appBaseUrl}}/v1/auth/login
+Content-Type: application/json
+Accept: application/json
+
+{
+  "email": "{{appEmail}}",
+  "password": "{{appPassword}}"
+}
+
+### App — cotizar unico_viaje (incluye Inter Assist)
+POST {{appBaseUrl}}/v1/quotes
+Authorization: Bearer {{appToken}}
+Content-Type: application/json
+Accept: application/json
+
+{
+  "departure_date": "2026-09-01",
+  "return_date": "2026-09-12",
+  "ages": [30],
+  "origin": "AR",
+  "destination_id": 2,
+  "trip_type": "unico_viaje"
+}
+
+### App — cotizar multiviaje (Inter Assist usa _30_dias_anual)
+POST {{appBaseUrl}}/v1/quotes
+Authorization: Bearer {{appToken}}
+Content-Type: application/json
+Accept: application/json
+
+{
+  "departure_date": "2026-09-01",
+  "return_date": "2027-08-31",
+  "ages": [30],
+  "origin": "AR",
+  "destination_id": 2,
+  "trip_type": "multiviaje"
+}

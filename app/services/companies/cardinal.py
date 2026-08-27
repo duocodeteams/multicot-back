@@ -210,7 +210,6 @@ class CardinalQuoteProvider:
                 continue
             nombre = (p.get("nombre") or "").strip()
             prestacion_id = p.get("prestacionId")
-            # Cardinal suele identificar "Tope Máximo Global" con prestacionId=75.
             if "Tope Máximo Global" in nombre or prestacion_id == 75:
                 valor_str = (p.get("valor") or "").strip()
                 return self._parse_coverage_valor(valor_str)
@@ -221,11 +220,9 @@ class CardinalQuoteProvider:
         if not valor_str:
             return Decimal("0")
         s = valor_str.upper().strip()
-        # Conserva solo números y separadores para soportar variantes de moneda (USD/US$/USS/etc).
         s = re.sub(r"[^0-9.,]", "", s)
         if not s:
             return Decimal("0")
-        # Si incluye punto y coma, asumimos el último separador como decimal; el resto son miles.
         if "." in s and "," in s:
             last_dot = s.rfind(".")
             last_comma = s.rfind(",")
@@ -235,13 +232,11 @@ class CardinalQuoteProvider:
             if decimal_sep == ",":
                 s = s.replace(",", ".")
         elif "." in s:
-            # "50.000" => miles; "50000.50" => decimal.
             parts = s.split(".")
             if len(parts) > 1 and all(part.isdigit() for part in parts):
                 if len(parts[-1]) == 3:
                     s = "".join(parts)
         elif "," in s:
-            # "50,000" => miles; "50000,50" => decimal.
             parts = s.split(",")
             if len(parts) > 1 and all(part.isdigit() for part in parts):
                 if len(parts[-1]) == 3:
