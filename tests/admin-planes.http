@@ -70,6 +70,18 @@ Content-Type: application/json
   ]
 }
 
+### habilitar solo markup
+PATCH {{base_url}}/v1/plans/4
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{
+  "producer_markup": 10,
+  "organizer_markup": 3,
+  "operating_expenses": 2
+}
+
+
 ### baja lógica
 DELETE {{base_url}}/v1/plans/1
 Authorization: Bearer {{token}}
