@@ -52,10 +52,10 @@ Content-Type: application/json
 {
   "agenteEmisorGuid": "{{agente_emisor_guid}}",
   "origenId": {{origen_id}},
-  "destinoId": 8,
-  "fechaSalida": "2026-09-01",
-  "fechaRegreso": "2026-09-15",
-  "edades": [30, 28],
+  "destinoId": 21,
+  "fechaSalida": "2026-08-26",
+  "fechaRegreso": "2026-11-11",
+  "edades": [80],
   "tarifaAnual": false,
   "email": "{{email}}",
   "localeId": 1,
@@ -91,7 +91,7 @@ Content-Type: application/json
   "fechaRegreso": "2027-08-31",
   "edades": [30],
   "tarifaAnual": true,
-  "maxDiasCorridos": 30,
+  "maxDiasCorridos": 90,
   "email": "{{email}}",
   "localeId": 1,
   "prestaciones": "cotizador"

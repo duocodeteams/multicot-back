@@ -1,5 +1,17 @@
-### Omint Assistance — B2B CreateQuotationB2B
-### Ambiente activo: PRODUCCIÓN (TEST Azure no valida el token — OpenIddict ID2170)
+### Omint Assistance — B2B CreateQuotationB2B (crudo)
+### Auth: OAuth2 Client Credentials → luego Bearer en /Quotation/CreateQuotationB2B
+### Ambiente: PRODUCCIÓN (TEST Azure no valida el token — OpenIddict ID2170)
+###
+### Flujo:
+###   1) Corré "get token"
+###   2) Copiá access_token a @access_token (o usá {{getToken.response.body.access_token}})
+###   3) Cotizá
+###
+### Destinos (destination_id app → destinationCode Omint):
+###   1 Nacional → ARG | 2 Latam → ASU | 3 Europa → EMO
+###   4 Resto mundo → MUC | 5 Norteamérica → NAC
+### productTypeCode: S=Simple | A=Anual/Multiviaje | L=Larga estadía
+### tariffTypeCode: B=Bruto | quantityOfDays (anual): 30 | 45 | 60
 
 @token_url = https://core.omintassistance.com.ar/connect/token
 @quote_url = https://api.omintassistance.com.ar/Quotation/CreateQuotationB2B
@@ -12,9 +24,10 @@
 
 @agreement_number = 3308
 @market_id = 2e455727-2099-469e-9e5d-a01a85072b1b
+@email = info@biantravel.com
 
-# Pegá acá el access_token de la respuesta del request "get token" (vence en ~60 min)
-@access_token =
+# Pegá acá el access_token de "get token" (vence en ~60 min)
+@access_token = eyJhbGciOiJSUzI1NiIsImtpZCI6IlVEWi1YLVBPU0VXV0FDSzFPVzRFR0ZCRE5UTEZZQjcxQzlCRTJKVlMiLCJ0eXAiOiJhdCtqd3QifQ.eyJpc3MiOiJodHRwczovL2NvcmUub21pbnRhc3Npc3RhbmNlLmNvbS5hci8iLCJleHAiOjE3ODc4MzIzMzUsImlhdCI6MTc4NzgyODczNSwiYXVkIjpbIk9BQ29yZUFwaSIsIkludGVncmF0aW9uV2ViQXBpIl0sInNjb3BlIjoiT0FDb3JlQXBpIEludGVncmF0aW9uV2ViQXBpIiwianRpIjoiNjVjNGU5NDYtZDg2Yy00MGMwLTk2NjctMzIxNmVmMDQwMmRlIiwic3ViIjoiZDcyNjIxMWUtNWRlZS00NDIxLTg2OTItMjQyYTY2YzM4ODJiIiwibmFtZSI6ImFzb3NhQGJpYW50cmF2ZWwuY29tIiwicHJlZmVycmVkX3VzZXJuYW1lIjoiZDcyNjIxMWUtNWRlZS00NDIxLTg2OTItMjQyYTY2YzM4ODJiIiwiY2xpZW50X2Rpc3BsYXlfbmFtZSI6ImFzb3NhQGJpYW50cmF2ZWwuY29tIiwidXNlcl9pZCI6ImQ3MjYyMTFlLTVkZWUtNDQyMS04NjkyLTI0MmE2NmMzODgyYiIsIm9pX3Byc3QiOiJkNzI2MjExZS01ZGVlLTQ0MjEtODY5Mi0yNDJhNjZjMzg4MmIiLCJjbGllbnRfaWQiOiJkNzI2MjExZS01ZGVlLTQ0MjEtODY5Mi0yNDJhNjZjMzg4MmIiLCJvaV90a25faWQiOiIzMzdhMmZlMy1jZGNjLTQ2ZWMtYWYwMi05MTgzNWY3Yzc4Y2EifQ.VMYDgx2-95PXd-RyO2dFJNBgTKO42Ynm471RhL6P7u6xNIpejUE2_bsT62Byh58ebqdg5L3d35pvCEdP51W6qYfhBTpx4lxkWkVJxsCE0OkHxW2c88W96ra8gh8WZ7dHvOLKS_2M3ieJE_0s2PxNZ1KmAVhxRzRpIKQtXg7XGI5j6ziErkDSKfeWzeCSuZ6edf3DPQHbI4rTX1M1k9hrUNuZBBJgfczxb5BYapjF4rGZGZSf0J3ZzQF0xWGg85kMut8170xir5c5UJGNh2zSr6i4kqJRKCsg2IkOdvl-efsCS8E0kotDtKTKijz6AUeNRv_Wa5Gi7z7S889JKzfylw
 
 
 ### 1) get token (OAuth2 Client Credentials)
@@ -24,7 +37,23 @@ Content-Type: application/x-www-form-urlencoded
 
 grant_type=client_credentials&client_id={{client_id}}&client_secret={{client_secret}}&scope={{scope}}
 
-### 2) Cotización Simple — todos los productos tipo S
+### 2) Cotizar — viaje único Europa (EMO) — como el provider
+POST {{quote_url}}
+Authorization: Bearer {{access_token}}
+Content-Type: application/json
+
+{
+  "productTypeCode": "S",
+  "tariffTypeCode": "B",
+  "departureCode": "MAA",
+  "destinationCode": "EMO",
+  "dateSince": "2026-09-01T00:00:00Z",
+  "dateUntil": "2026-09-15T00:00:00Z",
+  "passengerAges": [30, 28],
+  "email": "{{email}}"
+}
+
+### 3) Cotizar — viaje único Latinoamérica (ASU)
 POST {{quote_url}}
 Authorization: Bearer {{access_token}}
 Content-Type: application/json
@@ -34,32 +63,61 @@ Content-Type: application/json
   "tariffTypeCode": "B",
   "departureCode": "MAA",
   "destinationCode": "ASU",
-  "dateSince": "2026-09-10T00:00:00Z",
-  "dateUntil": "2026-09-20T00:00:00Z",
-  "passengerAges": [35, 38],
-  "email": "info@biantravel.com",
-  "name": "Prueba Biant",
-  "phoneNumber": "+54911234567"
+  "dateSince": "2026-09-01T00:00:00Z",
+  "dateUntil": "2026-09-10T00:00:00Z",
+  "passengerAges": [35],
+  "email": "{{email}}"
 }
 
-### 3) Cotización Simple — producto específico OA 30
+### 4) Cotizar — viaje único Nacional (ARG)
 POST {{quote_url}}
 Authorization: Bearer {{access_token}}
 Content-Type: application/json
 
 {
-  "productCode": "PA-S-d030-Cov",
+  "productTypeCode": "S",
   "tariffTypeCode": "B",
   "departureCode": "MAA",
-  "destinationCode": "EMO",
-  "dateSince": "2026-09-10T00:00:00Z",
-  "dateUntil": "2026-09-20T00:00:00Z",
-  "passengerAges": [40],
-  "email": "info@biantravel.com"
+  "destinationCode": "ARG",
+  "dateSince": "2026-09-01T00:00:00Z",
+  "dateUntil": "2026-09-15T00:00:00Z",
+  "passengerAges": [30, 28],
+  "email": "{{email}}"
 }
 
-### 4) Cotización Anual / Multiviaje
-# quantityOfDays obligatorio: 30 | 45 | 60
+### 5) Cotizar — viaje único Norteamérica (NAC)
+POST {{quote_url}}
+Authorization: Bearer {{access_token}}
+Content-Type: application/json
+
+{
+  "productTypeCode": "S",
+  "tariffTypeCode": "B",
+  "departureCode": "MAA",
+  "destinationCode": "NAC",
+  "dateSince": "2026-09-01T00:00:00Z",
+  "dateUntil": "2026-09-15T00:00:00Z",
+  "passengerAges": [30],
+  "email": "{{email}}"
+}
+
+### 6) Cotizar — viaje único Resto del mundo (MUC)
+POST {{quote_url}}
+Authorization: Bearer {{access_token}}
+Content-Type: application/json
+
+{
+  "productTypeCode": "S",
+  "tariffTypeCode": "B",
+  "departureCode": "MAA",
+  "destinationCode": "MUC",
+  "dateSince": "2026-09-01T00:00:00Z",
+  "dateUntil": "2026-09-15T00:00:00Z",
+  "passengerAges": [30],
+  "email": "{{email}}"
+}
+
+### 7) Cotizar — multiviaje / anual (quantityOfDays=30)
 POST {{quote_url}}
 Authorization: Bearer {{access_token}}
 Content-Type: application/json
@@ -69,14 +127,31 @@ Content-Type: application/json
   "tariffTypeCode": "B",
   "quantityOfDays": 30,
   "departureCode": "MAA",
-  "destinationCode": "ASU",
-  "dateSince": "2026-09-10T00:00:00Z",
-  "dateUntil": "2027-09-09T00:00:00Z",
-  "passengerAges": [35],
-  "email": "info@biantravel.com"
+  "destinationCode": "EMO",
+  "dateSince": "2026-09-01T00:00:00Z",
+  "dateUntil": "2027-08-31T00:00:00Z",
+  "passengerAges": [30],
+  "email": "{{email}}"
 }
 
-### 5) Cotización con agreementNumber + marketId
+### 8) Cotizar — multiviaje 60 días
+POST {{quote_url}}
+Authorization: Bearer {{access_token}}
+Content-Type: application/json
+
+{
+  "productTypeCode": "A",
+  "tariffTypeCode": "B",
+  "quantityOfDays": 60,
+  "departureCode": "MAA",
+  "destinationCode": "EMO",
+  "dateSince": "2026-09-01T00:00:00Z",
+  "dateUntil": "2027-08-31T00:00:00Z",
+  "passengerAges": [30],
+  "email": "{{email}}"
+}
+
+### 9) Cotizar — con agreementNumber + marketId (como .env opcional)
 POST {{quote_url}}
 Authorization: Bearer {{access_token}}
 Content-Type: application/json
@@ -87,20 +162,259 @@ Content-Type: application/json
   "productTypeCode": "S",
   "tariffTypeCode": "B",
   "departureCode": "MAA",
-  "destinationCode": "NAC",
-  "dateSince": "2026-09-10T00:00:00Z",
-  "dateUntil": "2026-09-20T00:00:00Z",
-  "passengerAges": [25, 27, 50],
-  "email": "info@biantravel.com"
+  "destinationCode": "EMO",
+  "dateSince": "2026-09-01T00:00:00Z",
+  "dateUntil": "2026-09-15T00:00:00Z",
+  "passengerAges": [30, 28],
+  "email": "{{email}}"
+}
+
+### 10) Uruguay — todos los Simple (destino URU)
+# En el acuerdo suelen aparecer OA 20 URU / OA 60 URU
+POST {{quote_url}}
+Authorization: Bearer {{access_token}}
+Content-Type: application/json
+
+{
+  "productTypeCode": "S",
+  "tariffTypeCode": "B",
+  "departureCode": "MAA",
+  "destinationCode": "URU",
+  "dateSince": "2026-09-01T00:00:00Z",
+  "dateUntil": "2026-09-15T00:00:00Z",
+  "passengerAges": [30],
+  "email": "{{email}}"
+}
+
+### 11) OA 20 URU (productCode específico)
+POST {{quote_url}}
+Authorization: Bearer {{access_token}}
+Content-Type: application/json
+
+{
+  "productCode": "PA-S-d020-URU-Cov",
+  "tariffTypeCode": "B",
+  "departureCode": "MAA",
+  "destinationCode": "URU",
+  "dateSince": "2026-09-01T00:00:00Z",
+  "dateUntil": "2026-09-15T00:00:00Z",
+  "passengerAges": [30],
+  "email": "{{email}}"
+}
+
+### 12) OA 60 URU (productCode específico)
+POST {{quote_url}}
+Authorization: Bearer {{access_token}}
+Content-Type: application/json
+
+{
+  "productCode": "PA-S-d060-URU-Cov",
+  "tariffTypeCode": "B",
+  "departureCode": "MAA",
+  "destinationCode": "URU",
+  "dateSince": "2026-09-01T00:00:00Z",
+  "dateUntil": "2026-09-15T00:00:00Z",
+  "passengerAges": [30],
+  "email": "{{email}}"
+}
+
+### 13) OA 10
+POST {{quote_url}}
+Authorization: Bearer {{access_token}}
+Content-Type: application/json
+
+{
+  "productCode": "PA-S-d010-Cov",
+  "tariffTypeCode": "B",
+  "departureCode": "MAA",
+  "destinationCode": "EMO",
+  "dateSince": "2026-09-01T00:00:00Z",
+  "dateUntil": "2026-09-15T00:00:00Z",
+  "passengerAges": [30],
+  "email": "{{email}}"
+}
+
+### 13b) OA 250
+POST {{quote_url}}
+Authorization: Bearer {{access_token}}
+Content-Type: application/json
+
+{
+  "productCode": "PA-S-d250-Cov",
+  "tariffTypeCode": "B",
+  "departureCode": "MAA",
+  "destinationCode": "EMO",
+  "dateSince": "2026-09-01T00:00:00Z",
+  "dateUntil": "2026-09-15T00:00:00Z",
+  "passengerAges": [30],
+  "email": "{{email}}"
+}
+
+### 14) OA 10 Arg Receptivo
+POST {{quote_url}}
+Authorization: Bearer {{access_token}}
+Content-Type: application/json
+
+{
+  "productCode": "PA-S-d010-ARG-Cov",
+  "tariffTypeCode": "B",
+  "departureCode": "MAA",
+  "destinationCode": "ARG",
+  "dateSince": "2026-09-01T00:00:00Z",
+  "dateUntil": "2026-09-15T00:00:00Z",
+  "passengerAges": [30],
+  "email": "{{email}}"
+}
+
+### 15) OA 30 Arg Receptivo
+POST {{quote_url}}
+Authorization: Bearer {{access_token}}
+Content-Type: application/json
+
+{
+  "productCode": "PA-S-d030-ARG-Cov",
+  "tariffTypeCode": "B",
+  "departureCode": "MAA",
+  "destinationCode": "ARG",
+  "dateSince": "2026-09-01T00:00:00Z",
+  "dateUntil": "2026-09-15T00:00:00Z",
+  "passengerAges": [30],
+  "email": "{{email}}"
+}
+
+### 16) OA 6 ARG
+POST {{quote_url}}
+Authorization: Bearer {{access_token}}
+Content-Type: application/json
+
+{
+  "productCode": "PA-S-d006-ARG-Cov",
+  "tariffTypeCode": "B",
+  "departureCode": "MAA",
+  "destinationCode": "ARG",
+  "dateSince": "2026-09-01T00:00:00Z",
+  "dateUntil": "2026-09-15T00:00:00Z",
+  "passengerAges": [30],
+  "email": "{{email}}"
+}
+
+### 17) Larga estadía — todos (productTypeCode=L)
+# Fecha fin > viaje corto; L no usa quantityOfDays
+POST {{quote_url}}
+Authorization: Bearer {{access_token}}
+Content-Type: application/json
+
+{
+  "productTypeCode": "L",
+  "tariffTypeCode": "B",
+  "departureCode": "MAA",
+  "destinationCode": "EMO",
+  "dateSince": "2026-09-01T00:00:00Z",
+  "dateUntil": "2027-03-01T00:00:00Z",
+  "passengerAges": [30],
+  "email": "{{email}}"
+}
+
+### 18) OA 30 Larga Estadía
+POST {{quote_url}}
+Authorization: Bearer {{access_token}}
+Content-Type: application/json
+
+{
+  "productCode": "PA-L-d030",
+  "tariffTypeCode": "B",
+  "departureCode": "MAA",
+  "destinationCode": "EMO",
+  "dateSince": "2026-09-01T00:00:00Z",
+  "dateUntil": "2027-03-01T00:00:00Z",
+  "passengerAges": [30],
+  "email": "{{email}}"
+}
+
+### 19) OA 50 Larga Estadía
+POST {{quote_url}}
+Authorization: Bearer {{access_token}}
+Content-Type: application/json
+
+{
+  "productCode": "PA-L-d050",
+  "tariffTypeCode": "B",
+  "departureCode": "MAA",
+  "destinationCode": "EMO",
+  "dateSince": "2026-09-01T00:00:00Z",
+  "dateUntil": "2027-03-01T00:00:00Z",
+  "passengerAges": [30],
+  "email": "{{email}}"
+}
+
+### 20) OA 70 Larga Estadía
+POST {{quote_url}}
+Authorization: Bearer {{access_token}}
+Content-Type: application/json
+
+{
+  "productCode": "PA-L-d070",
+  "tariffTypeCode": "B",
+  "departureCode": "MAA",
+  "destinationCode": "EMO",
+  "dateSince": "2026-09-01T00:00:00Z",
+  "dateUntil": "2027-03-01T00:00:00Z",
+  "passengerAges": [30],
+  "email": "{{email}}"
+}
+
+### 21) OA 100 Larga Estadía
+POST {{quote_url}}
+Authorization: Bearer {{access_token}}
+Content-Type: application/json
+
+{
+  "productCode": "PA-L-d100",
+  "tariffTypeCode": "B",
+  "departureCode": "MAA",
+  "destinationCode": "EMO",
+  "dateSince": "2026-09-01T00:00:00Z",
+  "dateUntil": "2027-03-01T00:00:00Z",
+  "passengerAges": [30],
+  "email": "{{email}}"
+}
+
+### 22) OA 150 Larga Estadía
+POST {{quote_url}}
+Authorization: Bearer {{access_token}}
+Content-Type: application/json
+
+{
+  "productCode": "PA-L-d150",
+  "tariffTypeCode": "B",
+  "departureCode": "MAA",
+  "destinationCode": "EMO",
+  "dateSince": "2026-09-01T00:00:00Z",
+  "dateUntil": "2027-03-01T00:00:00Z",
+  "passengerAges": [30],
+  "email": "{{email}}"
 }
 
 #
-# Códigos útiles (del manual)
+# Códigos útiles (manual B2B)
 # Orígenes:  MAA = Argentina
-# Destinos:  ASU América del Sur | ARG Argentina | AAA Asia/África
-#            NAC EEUU/Canadá | EMO Europa/Medio Oriente | MAC México/Centro/Caribe
-#            MUC Multi-Continente | OCE Oceania | URU Uruguay
-# Productos: S Simple | A Anual | L Larga Estadía
+# Destinos:  ARG | ASU | EMO | NAC | MUC | MAC | AAA | OCE | URU
+# Tipos:     S Simple | A Anual | L Larga Estadía
 # Tarifa:    B = Bruto
-# Acuerdo:   3308 | Market Argentina: 2e455727-2099-469e-9e5d-a01a85072b1b
+#
+# productCode:
+#   OA 20 URU          PA-S-d020-URU-Cov   (destino URU)
+#   OA 60 URU          PA-S-d060-URU-Cov   (destino URU)
+#   OA 10              PA-S-d010-Cov
+#   OA 250             PA-S-d250-Cov
+#   OA 10 Arg Recept.  PA-S-d010-ARG-Cov  (destino ARG)
+#   OA 30 Arg Recept.  PA-S-d030-ARG-Cov  (destino ARG)
+#   OA 6 ARG           PA-S-d006-ARG-Cov  (destino ARG)
+#   OA 30 Larga Est.   PA-L-d030
+#   OA 50 Larga Est.   PA-L-d050
+#   OA 70 Larga Est.   PA-L-d070
+#   OA 100 Larga Est.  PA-L-d100
+#   OA 150 Larga Est.  PA-L-d150
+#
+# Acuerdo: 3308 | Market Argentina: 2e455727-2099-469e-9e5d-a01a85072b1b
 #
