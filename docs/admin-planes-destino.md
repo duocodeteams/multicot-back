@@ -5,7 +5,7 @@ Diseño acordado para el catálogo de planes, la disponibilidad por destino y el
 ## Objetivo
 
 - Administrar qué planes se venden y en qué destinos (1–5).
-- Guardar un markup (%) por plan para armar el precio de venta sobre el neto.
+- Guardar el markup comercial del plan en tres porcentajes (productor, organizador, gastos operativos) que se suman al cotizar.
 - Dejar de prender/apagar compañías comentando código: se usa `companies.active`.
 
 ## Modelo
@@ -43,7 +43,9 @@ Identidad comercial del producto.
 | `company_id` | FK a `companies`. |
 | `external_plan_id` | ID del plan en la API de la compañía (ej. `product_id` de SETW). |
 | `name` | Nombre local, carga manual. |
-| `markup` | Porcentaje sobre el neto. Uno por plan, igual en todos los destinos. Default `0`. |
+| `producer_markup` | Markup productor (%). Default `0`. |
+| `organizer_markup` | Markup organizador (%). Default `0`. |
+| `operating_expenses` | Gastos operativos (%). Default `0`. |
 | `active` | On/off global. Baja lógica: `active=false`. Si es `false`, no se cotiza en ningún destino. |
 
 Unique: `(company_id, external_plan_id)`.
@@ -76,9 +78,10 @@ No hay disponibilidad por tipo de viaje (único / multiviaje / larga estadía) e
 
 ### Planes — `/v1/plans`
 
-- Alta manual: `company_id`, `external_plan_id`, `name`, `markup`. Destinos nacen apagados.
+- Alta manual: `company_id`, `external_plan_id`, `name` y los tres markups (default `0`). Destinos nacen apagados.
+- Listado y detalle devuelven los tres campos: `producer_markup`, `organizer_markup`, `operating_expenses`.
 - Listado con filtros: `company_id`, `destination_id` (solo planes con ese destino `enabled`), `active`.
-- Editar nombre, markup, `active`.
+- Editar nombre, los tres markups, `active`.
 - Toggle por destino.
 - DELETE = baja lógica (`active=false`).
 
@@ -95,9 +98,10 @@ Orden por cada provider:
 
 ### Markup
 
-Una sola regla, para todas las compañías: se incrementa el PVP que ya armó el adapter.
+Los tres porcentajes se **suman** (no se componen). El total es el que se aplica al precio y el que sale en `/v1/quotes` como `markup`. El desglose solo vive en el admin de planes.
 
 ```
+markup         = producer_markup + organizer_markup + operating_expenses
 factor         = 1 + markup / 100
 final_rate     = final_rate * factor
 final_rate_usd = final_rate_usd * factor
@@ -135,10 +139,10 @@ No se guarda un campo extra `tarifa_api`: ese precio **es** `final_rate` antes d
 | `POST` | `/v1/plans` | Alta de plan. Destinos en `false`. |
 | `GET` | `/v1/plans` | Listado. Query: `company_id`, `destination_id`, `active`, `limit`, `offset`. |
 | `GET` | `/v1/plans/{id}` | Detalle (incluye inactivos, para reactivar). |
-| `PATCH` | `/v1/plans/{id}` | `name`, `markup`, `active`, `destinations`. |
+| `PATCH` | `/v1/plans/{id}` | `name`, `producer_markup`, `organizer_markup`, `operating_expenses`, `active`, `destinations`. |
 ## Aplicación
 
 - En desarrollo (SQLite + `create_all`): al levantar uvicorn se crean las tablas y se hace seed de compañías.
-- En entornos con Alembic: `alembic upgrade head` (revisión `7c9e2a14b8d1`). El seed de compañías también corre al arrancar, sin pisar `active` ya guardado.
+- En entornos con Alembic: `alembic upgrade head` (revisión `9f3c1d8a4e21`). El seed de compañías también corre al arrancar, sin pisar `active` ya guardado. La migración copia el `markup` anterior a `producer_markup`.
 
 Ejemplos de requests: `tests/admin-planes.http`.

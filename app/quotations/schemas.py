@@ -10,6 +10,7 @@ Mapeo campos respuesta (ES → EN):
     tarifa final usd    → final_rate_usd
     tasa cambio         → exchange_rate
     tarifa final        → final_rate
+    markup              → markup (total: productor + organizador + gastos)
 """
 from datetime import date
 from decimal import Decimal
@@ -93,6 +94,10 @@ class QuotePlan(BaseModel):
     )
     exchange_rate: Decimal = Field(..., description="Tasa de cambio")
     final_rate: Decimal = Field(..., description="Tarifa final")
+    markup: Decimal = Field(
+        default=Decimal("0"),
+        description="Markup total aplicado (%): productor + organizador + gastos operativos",
+    )
     # Promociones / precio de lista (opcionales; no todas las compañías lo informan).
     base_rate_usd: Decimal | None = Field(default=None, description="Precio base (lista) en USD, si la compañía lo informa")
     base_rate: Decimal | None = Field(default=None, description="Precio base (lista) en moneda local (misma moneda que final_rate), si la compañía lo informa")

@@ -23,11 +23,17 @@ class Plan(SQLModel, TimestampMixin, table=True):
     company_id: int = Field(foreign_key="companies.id", index=True)
     external_plan_id: str = Field(index=True)
     name: str = Field()
-    markup: Decimal = Field(default=Decimal("0"))
+    producer_markup: Decimal = Field(default=Decimal("0"))
+    organizer_markup: Decimal = Field(default=Decimal("0"))
+    operating_expenses: Decimal = Field(default=Decimal("0"))
     active: bool = Field(default=True)
 
     company: Company = Relationship(back_populates="plans")
     destinations: list["PlanDestination"] = Relationship(back_populates="plan")
+
+    @property
+    def total_markup(self) -> Decimal:
+        return self.producer_markup + self.organizer_markup + self.operating_expenses
 
 
 class PlanDestination(SQLModel, TimestampMixin, table=True):

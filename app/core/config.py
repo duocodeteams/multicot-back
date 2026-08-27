@@ -108,8 +108,10 @@ class Settings(BaseSettings):
     omint_client_id: str = ""
     omint_client_secret: str = ""
     omint_scope: str = "OACoreApi IntegrationWebApi"
+    # Opcionales: el token ya resuelve el acuerdo; solo enviar si hace falta.
     omint_agreement_number: int | None = None
     omint_market_id: str = ""
+    # Días máx. por viaje en planes anuales (30 | 45 | 60)
     omint_annual_quantity_of_days: int = 30
 
 

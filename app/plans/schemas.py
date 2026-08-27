@@ -28,7 +28,9 @@ class PlanCreate(BaseModel):
     company_id: int
     external_plan_id: str = Field(..., min_length=1)
     name: str = Field(..., min_length=1)
-    markup: Decimal = Field(default=Decimal("0"), ge=0)
+    producer_markup: Decimal = Field(default=Decimal("0"), ge=0)
+    organizer_markup: Decimal = Field(default=Decimal("0"), ge=0)
+    operating_expenses: Decimal = Field(default=Decimal("0"), ge=0)
 
     @field_validator("external_plan_id", "name")
     @classmethod
@@ -41,7 +43,9 @@ class PlanCreate(BaseModel):
 
 class PlanUpdate(BaseModel):
     name: str | None = Field(default=None, min_length=1)
-    markup: Decimal | None = Field(default=None, ge=0)
+    producer_markup: Decimal | None = Field(default=None, ge=0)
+    organizer_markup: Decimal | None = Field(default=None, ge=0)
+    operating_expenses: Decimal | None = Field(default=None, ge=0)
     active: bool | None = None
     destinations: list[PlanDestinationInput] | None = None
 
@@ -72,7 +76,9 @@ class PlanResponse(BaseModel):
     company_name: str
     external_plan_id: str
     name: str
-    markup: Decimal
+    producer_markup: Decimal
+    organizer_markup: Decimal
+    operating_expenses: Decimal
     active: bool
     destinations: list[PlanDestinationResponse]
 

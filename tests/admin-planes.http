@@ -58,7 +58,9 @@ Authorization: Bearer {{token}}
 Content-Type: application/json
 
 {
-  "markup": 15,
+  "producer_markup": 10,
+  "organizer_markup": 3,
+  "operating_expenses": 2,
   "destinations": [
     {"destination_id": 1, "enabled": false},
     {"destination_id": 2, "enabled": true},

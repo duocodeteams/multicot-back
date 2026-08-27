@@ -1,5 +1,3 @@
-from decimal import Decimal
-
 from sqlalchemy import func
 from sqlalchemy.orm import selectinload
 from sqlmodel import Session, select
@@ -27,7 +25,9 @@ def _to_response(plan: Plan) -> PlanResponse:
         company_name=plan.company.name,
         external_plan_id=plan.external_plan_id,
         name=plan.name,
-        markup=plan.markup,
+        producer_markup=plan.producer_markup,
+        organizer_markup=plan.organizer_markup,
+        operating_expenses=plan.operating_expenses,
         active=plan.active,
         destinations=[
             PlanDestinationResponse(
@@ -67,7 +67,9 @@ def create_plan(session: Session, data: PlanCreate) -> Plan:
         company_id=data.company_id,
         external_plan_id=data.external_plan_id,
         name=data.name,
-        markup=data.markup if data.markup is not None else Decimal("0"),
+        producer_markup=data.producer_markup,
+        organizer_markup=data.organizer_markup,
+        operating_expenses=data.operating_expenses,
         active=True,
     )
     session.add(plan)

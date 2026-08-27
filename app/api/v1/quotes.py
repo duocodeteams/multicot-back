@@ -19,8 +19,7 @@ def create_quote(
     session: Annotated[Session, Depends(get_session)],
 ) -> QuoteResponse:
     """
-    Cotiza con las compañías activas (Cardinal, Go, New Travel, Inter Assist, Universal, Omint, etc.).
-    Aplica catálogo (whitelist + markup) si hay planes cargados.
+    Cotiza con las compañías activas. Aplica catálogo (whitelist + markup) si hay planes cargados.
     Requiere autenticación.
     """
     return get_quotes(session, request)

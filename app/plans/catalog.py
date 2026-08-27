@@ -63,15 +63,18 @@ def apply_markup(plan: QuotePlan, markup: Decimal) -> QuotePlan:
 
     Si el adapter mapeó neto y PVP al mismo valor (Terrawind), el markup
     queda aplicado sobre el neto. En el resto, sobre el PVP de la API.
-    Markup 0 deja el PVP igual.
+    Markup 0 deja el PVP igual. `markup` en la respuesta es el total aplicado.
     """
     factor = Decimal("1") + (markup / Decimal("100"))
-    return plan.model_copy(
-        update={
-            "final_rate": (plan.final_rate * factor).quantize(Decimal("0.01")),
-            "final_rate_usd": (plan.final_rate_usd * factor).quantize(Decimal("0.01")),
-        }
-    )
+    updates: dict[str, Decimal] = {
+        "markup": markup,
+        "final_rate": (plan.final_rate * factor).quantize(Decimal("0.01")),
+    }
+    if plan.final_rate_usd is not None:
+        updates["final_rate_usd"] = (plan.final_rate_usd * factor).quantize(
+            Decimal("0.01")
+        )
+    return plan.model_copy(update=updates)
 
 
 def filter_and_markup_plans(
@@ -89,5 +92,5 @@ def filter_and_markup_plans(
             continue
         if destination_id not in catalog.enabled_destinations.get(local_plan.id, set()):
             continue
-        result.append(apply_markup(quoted, local_plan.markup))
+        result.append(apply_markup(quoted, local_plan.total_markup))
     return result
