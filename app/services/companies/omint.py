@@ -130,7 +130,8 @@ _token_manager = OmintTokenManager()
 
 class OmintQuoteProvider:
     company_name = "Omint"
-
+    company_slug = "omint"
+    
     def __init__(self) -> None:
         self._settings = get_settings()
         self._token_manager = _token_manager

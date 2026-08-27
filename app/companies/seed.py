@@ -13,6 +13,7 @@ COMPANY_SEED: tuple[tuple[str, str, bool], ...] = (
     ("new_travel", "New Travel", True),
     ("inter_assist", "Inter Assist", True),
     ("universal", "Universal", True),
+    ("omint", "Omint", True),
 )
 
 
