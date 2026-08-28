@@ -24,10 +24,11 @@ logger = logging.getLogger(__name__)
 
 # destination_id (cotizador) -> idTerritory de New Travel
 # 1=Nacional, 2=Latinoamerica, 3=Europa, 4=Resto del mundo, 5=Norteamerica
+# Europa se mapea a Mundial: /orders/quote con territorio 2 (Europa) responde data=[].
 _DESTINATION_TO_TERRITORY: dict[int, str] = {
     DESTINO_ID_NACIONAL: "9",  # Local
     DESTINO_ID_LATINOAMERICA: "1",  # Mundial
-    DESTINO_ID_EUROPA: "2",  # Europa
+    DESTINO_ID_EUROPA: "1",  # Mundial (territorio Europa no cotiza en esta cuenta)
     DESTINO_ID_RESTO_MUNDO: "1",  # Mundial
     DESTINO_ID_NORTEAMERICA: "1",  # Mundial
 }
