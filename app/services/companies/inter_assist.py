@@ -43,7 +43,7 @@ from app.quotations.schemas import (
     QuoteRequest,
 )
 
-logger = logging.getLogger(_name_)
+logger = logging.getLogger(__name__)
 
 _DESTINATION_TO_INTERASSIST: dict[int, int] = {
     DESTINO_ID_LATINOAMERICA: 2,
@@ -66,7 +66,7 @@ class InterAssistQuoteProvider:
     company_name = "Inter Assist"
     company_slug = "inter_assist"
 
-    def _init_(self) -> None:
+    def __init__(self) -> None:
         self._settings = get_settings()
 
     def get_quotes(self, request: QuoteRequest) -> list[QuotePlan]:
