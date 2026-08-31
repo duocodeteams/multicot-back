@@ -5,18 +5,20 @@ La API no expone un endpoint de cotización. Se cotiza localmente a partir del
 catálogo GET /api/planes (tarifas por tramo de días / edad / tipo de viaje).
 
 Tarifa diaria (unico_viaje):
-- Edades: 0-69 (sin sufijo), 70-85 (_70), 86+ (_86).
-- Bloques de días: los que traiga cada plan (_5_dias, _10_dias, ...).
-- Si days cae en un bloque → tarifa del bloque.
-- Si está entre bloques → bloque anterior + (días extra) * dia_adicional.
-- Si supera el último → último + días extra * dia_adicional.
+•⁠  ⁠Edades: 0-69 (sin sufijo), 70-85 (_70), 86+ (_86).
+•⁠  ⁠Bloques de días: los que traiga cada plan (_5_dias, _10_dias, ...).
+•⁠  ⁠Si days cae en un bloque → tarifa del bloque.
+•⁠  ⁠Si está entre bloques → bloque anterior + (días extra) * dia_adicional.
+•⁠  ⁠Si supera el último → último + días extra * dia_adicional.
 
-Multiviaje: tarifa anual fija (_30_dias_anual por default), igual que
-Cardinal maxDiasCorridos / Omint quantityOfDays. No usa la duración del viaje.
+Multiviaje: no usa las fechas del viaje. Usa request.days_range (30 / 60 / 90)
+como días corridos por viaje, según el schema:
+  30 → _30_dias_anual, 60 → _60_dias_anual, 90 → _90_dias_anual.
+El plan es el mismo; solo cambia la key. Si esa key está en 0, no se cotiza.
 
 IMPORTANTE: no usar POST /api/ventas para cotizar (emite vouchers).
 """
-from __future__ import annotations
+from _future_ import annotations
 
 import logging
 import math
@@ -28,6 +30,7 @@ import httpx
 
 from app.core.config import get_settings
 from app.quotations.schemas import (
+    DAYS_RANGE_VALIDOS,
     DESTINO_ID_EUROPA,
     DESTINO_ID_LATINOAMERICA,
     DESTINO_ID_NORTEAMERICA,
@@ -40,7 +43,7 @@ from app.quotations.schemas import (
     QuoteRequest,
 )
 
-logger = logging.getLogger(__name__)
+logger = logging.getLogger(_name_)
 
 _DESTINATION_TO_INTERASSIST: dict[int, int] = {
     DESTINO_ID_LATINOAMERICA: 2,
@@ -54,16 +57,16 @@ _DAILY_BRACKETS_DEFAULT: tuple[int, ...] = (5, 10, 16, 22, 30, 45, 60, 90)
 _MAX_PAGES = 50
 
 # Keys de tarifa diaria por edad: 0-69 sin sufijo, 70-85 → _70, 86+ → _86
-_DAILY_KEY_RE_BASE = re.compile(r"^_(\d+)_dias$")
-_DAILY_KEY_RE_70 = re.compile(r"^_(\d+)_dias_70$")
-_DAILY_KEY_RE_86 = re.compile(r"^_(\d+)_dias_86$")
+DAILY_KEY_RE_BASE = re.compile(r"^(\d+)_dias$")
+DAILY_KEY_RE_70 = re.compile(r"^(\d+)_dias_70$")
+DAILY_KEY_RE_86 = re.compile(r"^(\d+)_dias_86$")
 
 
 class InterAssistQuoteProvider:
     company_name = "Inter Assist"
     company_slug = "inter_assist"
 
-    def __init__(self) -> None:
+    def _init_(self) -> None:
         self._settings = get_settings()
 
     def get_quotes(self, request: QuoteRequest) -> list[QuotePlan]:
@@ -99,10 +102,6 @@ class InterAssistQuoteProvider:
                 return []
 
         pais_id = settings.interassist_pais_argentina_id
-        print(
-            f"[InterAssist RAW] request trip_type={request.trip_type} "
-            f"days={trip_days} ages={request.ages} destino_id={destino_id}"
-        )
         plans: list[QuotePlan] = []
         for raw in raw_plans:
             try:
@@ -113,87 +112,15 @@ class InterAssistQuoteProvider:
                     pais_id=pais_id,
                     trip_days=trip_days,
                 )
-            except Exception as e:
-                print(f"[InterAssist RAW] EXCEPCION plan id={raw.get('id')}: {e}")
+            except Exception:
+                logger.exception(
+                    "InterAssist: error mapeando plan id=%s", raw.get("id")
+                )
                 continue
             if plan:
-                self._debug_print_raw_tarifas(raw, request, trip_days, plan)
                 plans.append(plan)
 
-        print(f"[InterAssist RAW] planes cotizados={len(plans)} de {len(raw_plans)}")
         return plans
-
-    def _debug_print_raw_tarifas(
-        self,
-        raw: dict[str, Any],
-        request: QuoteRequest,
-        trip_days: int,
-        plan: QuotePlan,
-    ) -> None:
-        """Dump de tarifas crudas de la API vs precio calculado (solo debug)."""
-        plan_id = raw.get("id")
-        nombre = raw.get("nombre")
-        moneda = (raw.get("moneda") or {}).get("nombre") if isinstance(raw.get("moneda"), dict) else raw.get("moneda")
-        lcc = raw.get("local_currency_conversion")
-        descuento = raw.get("descuento")
-        tipo_emision = raw.get("tipo_emision")
-        tipo_tarifa = raw.get("tipo_tarifa")
-
-        # Campos de tarifa crudos (diarios / anuales / long stay / dia adicional)
-        tarifa_keys = [
-            k for k in raw.keys()
-            if (
-                k.startswith("_")
-                or k.startswith("dia_adicional")
-            )
-            and raw.get(k) not in (None, "", "0", "0.00", 0, 0.0)
-        ]
-        tarifas = {k: raw.get(k) for k in sorted(tarifa_keys)}
-
-        # Qué fórmula usamos por pasajero
-        por_pasajero = []
-        for age in request.ages:
-            suffix = self._age_suffix(age)
-            formula = None
-            price = None
-            if request.trip_type == TRIP_TYPE_UNICO_VIAJE:
-                formula = self._daily_price_formula(raw, trip_days, suffix)
-                price = self._daily_price(raw, trip_days, suffix)
-            elif request.trip_type == TRIP_TYPE_MULTIVIAJE:
-                annual_days = self._settings.interassist_annual_days
-                formula = (
-                    f"_{annual_days}_dias{suffix}_anual"
-                    if suffix
-                    else f"_{annual_days}_dias_anual"
-                )
-                price = self._annual_price(raw, trip_days, suffix)
-            elif request.trip_type == TRIP_TYPE_LARGA_ESTADIA:
-                months = max(3, math.ceil(trip_days / 30))
-                formula = f"_{min(months, 15)}_meses{suffix}"
-                price = self._long_stay_price(raw, trip_days, suffix)
-            por_pasajero.append(
-                {
-                    "age": age,
-                    "age_band": "86+" if suffix == "_86" else ("70-85" if suffix == "_70" else "0-69"),
-                    "formula": formula,
-                    "price_used": str(price) if price is not None else None,
-                }
-            )
-
-        print(
-            f"[InterAssist RAW] plan id={plan_id} nombre='{nombre}' "
-            f"moneda={moneda} lcc={lcc} descuento={descuento} "
-            f"tipo_tarifa={tipo_tarifa} tipo_emision={tipo_emision}"
-        )
-        print(f"[InterAssist RAW]   cobertura={raw.get('cobertura')} "
-              f"edad_maxima={raw.get('edad_maxima')} activo={raw.get('activo')}")
-        print(f"[InterAssist RAW]   tarifas_no_cero={tarifas}")
-        print(f"[InterAssist RAW]   calculo_por_pasajero={por_pasajero}")
-        print(
-            f"[InterAssist RAW]   RESULTADO final_rate_usd={plan.final_rate_usd} "
-            f"final_rate={plan.final_rate} exchange_rate={plan.exchange_rate} "
-            f"net_rate={plan.net_rate}"
-        )
 
     def _fetch_all_plans(
         self,
@@ -243,6 +170,14 @@ class InterAssistQuoteProvider:
 
         logger.debug("InterAssist: planes obtenidos=%s pages_fetched=%s", len(all_plans), page - 1)
         return all_plans
+
+    def _annual_price_keys(self, bracket: int, age_suffix: str) -> tuple[str, ...]:
+        if age_suffix:
+            return (
+                f"_{bracket}_dias{age_suffix}_anual",
+                f"_{bracket}_dias_anual{age_suffix}",
+            )
+        return (f"_{bracket}_dias_anual",)
 
     def _extract_page(
         self, payload: Any
@@ -373,7 +308,7 @@ class InterAssistQuoteProvider:
     ) -> Decimal | None:
         total = Decimal("0")
         for age in request.ages:
-            price = self._price_for_passenger(raw, request.trip_type, trip_days, age)
+            price = self._price_for_passenger(raw, request, trip_days, age)
             if price is None:
                 return None
             total += price
@@ -387,16 +322,16 @@ class InterAssistQuoteProvider:
     def _price_for_passenger(
         self,
         raw: dict[str, Any],
-        trip_type: str,
+        request: QuoteRequest,
         trip_days: int,
         age: int,
     ) -> Decimal | None:
         suffix = self._age_suffix(age)
-        if trip_type == TRIP_TYPE_UNICO_VIAJE:
+        if request.trip_type == TRIP_TYPE_UNICO_VIAJE:
             return self._daily_price(raw, trip_days, suffix)
-        if trip_type == TRIP_TYPE_MULTIVIAJE:
-            return self._annual_price(raw, trip_days, suffix)
-        if trip_type == TRIP_TYPE_LARGA_ESTADIA:
+        if request.trip_type == TRIP_TYPE_MULTIVIAJE:
+            return self._annual_price(raw, request.days_range, suffix)
+        if request.trip_type == TRIP_TYPE_LARGA_ESTADIA:
             return self._long_stay_price(raw, trip_days, suffix)
         return None
 
@@ -469,43 +404,17 @@ class InterAssistQuoteProvider:
             return None
         return base + (extra_day * Decimal(trip_days - prev))
 
-    def _daily_price_formula(
-        self, raw: dict[str, Any], trip_days: int, age_suffix: str
-    ) -> str:
-        """Texto de la fórmula aplicada (para debug)."""
-        brackets = self._daily_brackets_for_plan(raw, age_suffix)
-        if trip_days in brackets:
-            return self._daily_key(trip_days, age_suffix)
-        if trip_days < brackets[0]:
-            return f"{self._daily_key(brackets[0], age_suffix)} (mínimo)"
-        if trip_days > brackets[-1]:
-            extra = trip_days - brackets[-1]
-            return (
-                f"{self._daily_key(brackets[-1], age_suffix)} + "
-                f"{extra}*dia_adicional{age_suffix}"
-            )
-        prev = max(b for b in brackets if b < trip_days)
-        extra = trip_days - prev
-        return (
-            f"{self._daily_key(prev, age_suffix)} + "
-            f"{extra}*dia_adicional{age_suffix}"
-        )
-
     def _annual_price(
-        self, raw: dict[str, Any], trip_days: int, age_suffix: str
+        self, raw: dict[str, Any], days_range: int | None, age_suffix: str
     ) -> Decimal | None:
-        """
-        Multiviaje (anual): no se cotiza por duración del viaje.
-        Igual que Cardinal (maxDiasCorridos=30) / Omint (quantityOfDays):
-        se usa la tarifa anual de días corridos configurada (default 30).
-        """
-        del trip_days  # no aplica: el producto es anual
-        bracket = self._settings.interassist_annual_days
-        if age_suffix:
-            key = f"_{bracket}_dias{age_suffix}_anual"
-        else:
-            key = f"_{bracket}_dias_anual"
-        return self._parse_decimal(raw.get(key))
+        """Tarifa anual exacta: 30 → _30_dias_anual, 60 → _60_dias_anual, 90 → _90_dias_anual."""
+        if days_range not in DAYS_RANGE_VALIDOS:
+            return None
+        for key in self._annual_price_keys(days_range, age_suffix):
+            price = self._parse_decimal(raw.get(key))
+            if price is not None:
+                return price
+        return None
 
     def _long_stay_price(
         self, raw: dict[str, Any], trip_days: int, age_suffix: str
