@@ -18,7 +18,7 @@ El plan es el mismo; solo cambia la key. Si esa key está en 0, no se cotiza.
 
 IMPORTANTE: no usar POST /api/ventas para cotizar (emite vouchers).
 """
-from _future_ import annotations
+from __future__ import annotations
 
 import logging
 import math
