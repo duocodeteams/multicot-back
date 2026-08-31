@@ -45,7 +45,7 @@ def get_quotes(session: Session, request: QuoteRequest) -> QuoteResponse:
             )
             continue
         try:
-            plans = provider.get_quotes(request)
+            quoted = provider.get_quotes(request)
         except Exception as exc:
             logger.warning(
                 "Proveedor %s falló: %s",
@@ -54,6 +54,41 @@ def get_quotes(session: Session, request: QuoteRequest) -> QuoteResponse:
                 exc_info=True,
             )
             continue
-        plans = filter_and_markup_plans(catalog, request.destination_id, plans)
+        plans = filter_and_markup_plans(catalog, request.destination_id, quoted)
+        if catalog.has_any_plan:
+            kept_ids = {p.plan_id for p in plans}
+            dropped = [
+                (p.plan_id, p.plan_name)
+                for p in quoted
+                if p.plan_id not in kept_ids
+            ]
+            logger.info(
+                "%s: trip_type=%s days_range=%s dest=%s quoted=%s kept=%s dropped=%s %s",
+                provider.company_slug,
+                request.trip_type,
+                request.days_range,
+                request.destination_id,
+                len(quoted),
+                len(plans),
+                len(dropped),
+                dropped,
+            )
+        else:
+            logger.info(
+                "%s: trip_type=%s days_range=%s dest=%s quoted=%s (sin whitelist de catálogo)",
+                provider.company_slug,
+                request.trip_type,
+                request.days_range,
+                request.destination_id,
+                len(quoted),
+            )
         all_plans.extend(plans)
+    logger.info(
+        "quote end trip_type=%s days_range=%s dest=%s total=%s companies=%s",
+        request.trip_type,
+        request.days_range,
+        request.destination_id,
+        len(all_plans),
+        sorted({p.company for p in all_plans}),
+    )
     return QuoteResponse(plans=all_plans)

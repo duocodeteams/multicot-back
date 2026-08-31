@@ -15,12 +15,16 @@ from app.quotations.schemas import (
     DESTINO_ID_NACIONAL,
     DESTINO_ID_NORTEAMERICA,
     DESTINO_ID_RESTO_MUNDO,
+    TRIP_TYPE_MULTIVIAJE,
     Benefit,
     QuotePlan,
     QuoteRequest,
 )
 
 logger = logging.getLogger(__name__)
+
+# Planes anuales New Travel: minDays=maxDays=365. Un día de más y data=[].
+_ANNUAL_INCLUSIVE_DAYS = 365
 
 # destination_id (cotizador) -> idTerritory de New Travel
 # 1=Nacional, 2=Latinoamerica, 3=Europa, 4=Resto del mundo, 5=Norteamerica
@@ -59,10 +63,13 @@ class NewTravelQuoteProvider:
             return []
 
         logger.debug(
-            "NewTravel: quote start origin=%s destination_id=%s territory_id=%s %s->%s ages=%s",
+            "NewTravel: quote start origin=%s destination_id=%s territory_id=%s "
+            "trip_type=%s days_range=%s %s->%s ages=%s",
             request.origin,
             request.destination_id,
             territory_id,
+            request.trip_type,
+            request.days_range,
             request.departure_date,
             request.return_date,
             request.ages,
@@ -182,15 +189,25 @@ class NewTravelQuoteProvider:
         request: QuoteRequest,
         territory_id: str,
     ) -> list[dict[str, Any]]:
-        body = {
+        body: dict[str, Any] = {
             "origin": request.origin,
             "destination": territory_id,
             "startDate": request.departure_date.strftime("%Y/%m/%d"),
             "endDate": request.return_date.strftime("%Y/%m/%d"),
             "ages": request.ages,
-            # TODO: para planes multiviaje, enviar daysRange (30/45/60/90/120)
-            # cuando se definan reglas finales de trip_type -> daysRange.
         }
+        if request.trip_type == TRIP_TYPE_MULTIVIAJE:
+            # daysRange es obligatorio para anuales. Las fechas las manda el front
+            # (tienen que ser 365 días corridos; si no, la API responde data=[]).
+            body["daysRange"] = str(self._annual_days_range(request))
+            trip_days = (request.return_date - request.departure_date).days + 1
+            if trip_days != _ANNUAL_INCLUSIVE_DAYS:
+                logger.info(
+                    "NewTravel: multiviaje con %s días (esperado %s); "
+                    "la API puede devolver 0 planes MV",
+                    trip_days,
+                    _ANNUAL_INCLUSIVE_DAYS,
+                )
         headers = {"token": token, "Content-Type": "application/json"}
         t0 = time.monotonic()
         response = client.post(f"{base_url}/orders/quote", headers=headers, json=body)
@@ -229,6 +246,11 @@ class NewTravelQuoteProvider:
                 _preview(data),
             )
         return plans
+
+    def _annual_days_range(self, request: QuoteRequest) -> int:
+        if request.days_range is not None:
+            return request.days_range
+        return 30
 
     def _quoted_plan_to_quote_plan(
         self,

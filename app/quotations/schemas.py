@@ -28,6 +28,9 @@ TRIP_TYPES_VALIDOS: tuple[TripType, ...] = (
     TRIP_TYPE_MULTIVIAJE,
     TRIP_TYPE_LARGA_ESTADIA,
 )
+# Días corridos por viaje en multiviaje (lo que el front manda en days_range).
+DaysRange = Literal[30, 60, 90]
+DAYS_RANGE_VALIDOS: tuple[int, ...] = (30, 60, 90)
 
 # IDs de destino del cotizador (el frontend envía estos IDs).
 DESTINO_ID_NACIONAL = 1
@@ -50,6 +53,10 @@ class QuoteRequest(BaseModel):
         default=TRIP_TYPE_UNICO_VIAJE,
         description="Tipo de viaje: unico_viaje, multiviaje (anual), larga_estadia",
     )
+    days_range: DaysRange | None = Field(
+        default=None,
+        description="Días corridos por viaje en multiviaje: 30, 60 o 90",
+    )
 
     @model_validator(mode="after")
     def return_after_departure(self):
@@ -59,6 +66,10 @@ class QuoteRequest(BaseModel):
             raise ValueError(f"destination_id debe ser 1-5, recibido: {self.destination_id}")
         if self.trip_type not in TRIP_TYPES_VALIDOS:
             raise ValueError(f"trip_type debe ser {TRIP_TYPES_VALIDOS}, recibido: {self.trip_type}")
+        if self.days_range is not None and self.days_range not in DAYS_RANGE_VALIDOS:
+            raise ValueError(
+                f"days_range debe ser {DAYS_RANGE_VALIDOS}, recibido: {self.days_range}"
+            )
         return self
 
 

@@ -134,3 +134,17 @@ Content-Type: application/json
   "endDate": "2026/04/29",
   "ages": [22, 30]
 }
+
+### POST cotizar multiviaje (daysRange obligatorio; fechas = 365 días exactos)
+POST {{base_url}}/orders/quote
+token: {{token}}
+Content-Type: application/json
+
+{
+  "origin": "AR",
+  "destination": "1",
+  "startDate": "2026/09/10",
+  "endDate": "2027/09/09",
+  "daysRange": "30",
+  "ages": [30]
+}

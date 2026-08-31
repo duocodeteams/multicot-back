@@ -26,3 +26,18 @@ Content-Type: application/json
   "destination_id": 2,
   "trip_type": "unico_viaje"
 }
+
+### COTIZAR multiviaje (days_range: 30 | 60 | 90)
+POST {{base_url}}/v1/quotes
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{
+  "departure_date": "2026-09-10",
+  "return_date": "2027-09-09",
+  "ages": [30],
+  "origin": "AR",
+  "destination_id": 3,
+  "trip_type": "multiviaje",
+  "days_range": 60
+}
