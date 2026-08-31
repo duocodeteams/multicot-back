@@ -5,11 +5,11 @@ La API no expone un endpoint de cotización. Se cotiza localmente a partir del
 catálogo GET /api/planes (tarifas por tramo de días / edad / tipo de viaje).
 
 Tarifa diaria (unico_viaje):
-•⁠  ⁠Edades: 0-69 (sin sufijo), 70-85 (_70), 86+ (_86).
-•⁠  ⁠Bloques de días: los que traiga cada plan (_5_dias, _10_dias, ...).
-•⁠  ⁠Si days cae en un bloque → tarifa del bloque.
-•⁠  ⁠Si está entre bloques → bloque anterior + (días extra) * dia_adicional.
-•⁠  ⁠Si supera el último → último + días extra * dia_adicional.
+- Edades: 0-69 (sin sufijo), 70-85 (_70), 86+ (_86).
+- Bloques de días: los que traiga cada plan (_5_dias, _10_dias, ...).
+- Si days cae en un bloque → tarifa del bloque.
+- Si está entre bloques → bloque anterior + (días extra) * dia_adicional.
+- Si supera el último → último + días extra * dia_adicional.
 
 Multiviaje: no usa las fechas del viaje. Usa request.days_range (30 / 60 / 90)
 como días corridos por viaje, según el schema:
@@ -57,9 +57,9 @@ _DAILY_BRACKETS_DEFAULT: tuple[int, ...] = (5, 10, 16, 22, 30, 45, 60, 90)
 _MAX_PAGES = 50
 
 # Keys de tarifa diaria por edad: 0-69 sin sufijo, 70-85 → _70, 86+ → _86
-DAILY_KEY_RE_BASE = re.compile(r"^(\d+)_dias$")
-DAILY_KEY_RE_70 = re.compile(r"^(\d+)_dias_70$")
-DAILY_KEY_RE_86 = re.compile(r"^(\d+)_dias_86$")
+_DAILY_KEY_RE_BASE = re.compile(r"^_(\d+)_dias$")
+_DAILY_KEY_RE_70 = re.compile(r"^_(\d+)_dias_70$")
+_DAILY_KEY_RE_86 = re.compile(r"^_(\d+)_dias_86$")
 
 
 class InterAssistQuoteProvider:
