@@ -75,6 +75,8 @@ class UniversalQuoteProvider:
             "Content-Type": "text/xml;charset=UTF-8",
             "Accept": "text/xml",
             "SOAPAction": f'"{_SOAP_ACTION}"',
+            # Cloudflare Bot Fight Mode desafía UAs conocidos (python-httpx, curl, python-requests).
+            "User-Agent": "Cotizador-API/1.0",
         }
 
         with httpx.Client(timeout=30.0) as client:
