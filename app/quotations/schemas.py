@@ -113,9 +113,14 @@ class QuotePlan(BaseModel):
         description="Markup total aplicado (%): productor + organizador + gastos operativos",
     )
     # Promociones / precio de lista (opcionales; no todas las compañías lo informan).
+    # Para mostrar dos precios: base_rate = sin promo, final_rate = con promo.
     base_rate_usd: Decimal | None = Field(default=None, description="Precio base (lista) en USD, si la compañía lo informa")
     base_rate: Decimal | None = Field(default=None, description="Precio base (lista) en moneda local (misma moneda que final_rate), si la compañía lo informa")
     discount_pct: Decimal | None = Field(default=None, description="Porcentaje de descuento aplicado (0-100), si la compañía lo informa")
+    promotion_name: str | None = Field(
+        default=None,
+        description="Nombre de la promoción aplicada (ej. PROMO 40% OFF), si la compañía lo informa",
+    )
     exceptions: list[PlanException] = Field(default_factory=list, description="Excepciones del producto (para mostrar en 'Ver más'), si la compañía las informa")
 
 

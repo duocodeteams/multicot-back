@@ -16,6 +16,12 @@ como días corridos por viaje, según el schema:
   30 → _30_dias_anual, 60 → _60_dias_anual, 90 → _90_dias_anual.
 El plan es el mismo; solo cambia la key. Si esa key está en 0, no se cotiza.
 
+Promociones (promociones_object):
+- Precio lista → base_rate / base_rate_usd
+- Precio con promo → final_rate / final_rate_usd
+- % y nombre → discount_pct / promotion_name
+Si no hay promo activa, base_rate queda null (solo final_rate).
+
 IMPORTANTE: no usar POST /api/ventas para cotizar (emite vouchers).
 """
 from __future__ import annotations
@@ -23,6 +29,7 @@ from __future__ import annotations
 import logging
 import math
 import re
+from datetime import date, datetime
 from decimal import Decimal, InvalidOperation
 from typing import Any
 
@@ -239,14 +246,35 @@ class InterAssistQuoteProvider:
             if max_age is not None and any(age > max_age for age in request.ages):
                 return None
 
-        total = self._calculate_total_price(raw, request, trip_days)
-        if total is None or total <= 0:
+        # Precio de lista (sin promociones_object). El descuento legacy del plan
+        # solo aplica si no hay promo activa.
+        list_total = self._calculate_list_price(raw, request, trip_days)
+        if list_total is None or list_total <= 0:
             return None
+
+        promo = self._select_active_promotion(raw, reference_date=date.today())
+        discount_pct: Decimal | None = None
+        promotion_name: str | None = None
+        if promo is not None:
+            discount_pct, promotion_name = promo
+            final_total = (
+                list_total * (Decimal("1") - (discount_pct / Decimal("100")))
+            ).quantize(Decimal("0.01"))
+        else:
+            plan_descuento = self._parse_decimal(raw.get("descuento")) or Decimal("0")
+            if plan_descuento > 0:
+                discount_pct = plan_descuento.quantize(Decimal("0.01"))
+                final_total = (
+                    list_total * (Decimal("1") - (plan_descuento / Decimal("100")))
+                ).quantize(Decimal("0.01"))
+            else:
+                final_total = list_total
 
         plan_name = str(raw.get("nombre") or "").strip() or str(plan_id)
         benefits = self._extract_benefits(raw)
         coverage_amount = self._extract_coverage(raw, benefits)
-        final_rate_usd = total.quantize(Decimal("0.01"))
+        list_rate_usd = list_total.quantize(Decimal("0.01"))
+        final_rate_usd = final_total.quantize(Decimal("0.01"))
 
         # La tarifa del plan está en la moneda indicada por "moneda" (ej. Dólar).
         # local_currency_conversion funciona como TC a moneda local cuando > 1.
@@ -255,15 +283,16 @@ class InterAssistQuoteProvider:
         # Temporal: exchange_rate fijo en 2 (independiente del cálculo de final_rate).
         lcc = self._parse_decimal(raw.get("local_currency_conversion"))
         if lcc is not None and lcc > 1:
-            final_rate = (final_rate_usd * lcc.quantize(Decimal("0.0001"))).quantize(
-                Decimal("0.01")
-            )
-            net_rate = final_rate
+            fx = lcc.quantize(Decimal("0.0001"))
+            list_rate = (list_rate_usd * fx).quantize(Decimal("0.01"))
+            final_rate = (final_rate_usd * fx).quantize(Decimal("0.01"))
         else:
+            list_rate = list_rate_usd
             final_rate = final_rate_usd
-            net_rate = final_rate_usd
         exchange_rate = Decimal("2")
+        net_rate = final_rate
 
+        has_promo_price = discount_pct is not None and final_rate < list_rate
         return QuotePlan(
             company=self.company_name,
             id=str(plan_id),
@@ -275,6 +304,10 @@ class InterAssistQuoteProvider:
             final_rate_usd=final_rate_usd,
             exchange_rate=exchange_rate,
             final_rate=final_rate,
+            base_rate_usd=list_rate_usd if has_promo_price else None,
+            base_rate=list_rate if has_promo_price else None,
+            discount_pct=discount_pct if has_promo_price else None,
+            promotion_name=promotion_name if has_promo_price else None,
         )
 
     def _matches_destino(self, raw: dict[str, Any], destino_id: int) -> bool:
@@ -300,24 +333,85 @@ class InterAssistQuoteProvider:
                 return True
         return False
 
-    def _calculate_total_price(
+    def _calculate_list_price(
         self,
         raw: dict[str, Any],
         request: QuoteRequest,
         trip_days: int,
     ) -> Decimal | None:
+        """Suma tarifas de tabla (sin descuento del plan ni promociones_object)."""
         total = Decimal("0")
         for age in request.ages:
             price = self._price_for_passenger(raw, request, trip_days, age)
             if price is None:
                 return None
             total += price
-
-        descuento = self._parse_decimal(raw.get("descuento")) or Decimal("0")
-        if descuento > 0:
-            # Se interpreta como porcentaje (ej. 10 = 10%).
-            total = total * (Decimal("1") - (descuento / Decimal("100")))
         return total
+
+    def _select_active_promotion(
+        self, raw: dict[str, Any], reference_date: date
+    ) -> tuple[Decimal, str] | None:
+        """
+        Elige la mejor promo activa de promociones_object (mayor %).
+        Solo tipo porcentaje. Valida activo + ventana programada.
+        """
+        items = raw.get("promociones_object") or []
+        if not isinstance(items, list):
+            return None
+
+        best_pct: Decimal | None = None
+        best_name: str | None = None
+        for entry in items:
+            if not isinstance(entry, dict):
+                continue
+            if entry.get("activo") is False:
+                continue
+
+            tipo = entry.get("tipo_promocion") or {}
+            tipo_nombre = ""
+            if isinstance(tipo, dict):
+                tipo_nombre = str(tipo.get("nombre") or "").strip().lower()
+            if tipo_nombre and "porcentaje" not in tipo_nombre:
+                continue
+
+            pct = self._parse_decimal(entry.get("porcentaje"))
+            if pct is None or pct <= 0 or pct >= 100:
+                continue
+
+            if entry.get("programado"):
+                start = self._parse_api_date(entry.get("fecha_inicial"))
+                end = self._parse_api_date(entry.get("fecha_final"))
+                if start is not None and reference_date < start:
+                    continue
+                if end is not None and reference_date > end:
+                    continue
+
+            nombre = str(entry.get("nombre") or "").strip() or f"{pct}% OFF"
+            if best_pct is None or pct > best_pct:
+                best_pct = pct
+                best_name = nombre
+
+        if best_pct is None or best_name is None:
+            return None
+        return best_pct.quantize(Decimal("0.01")), best_name
+
+    def _parse_api_date(self, value: Any) -> date | None:
+        if value is None:
+            return None
+        if isinstance(value, date) and not isinstance(value, datetime):
+            return value
+        s = str(value).strip()
+        if not s:
+            return None
+        try:
+            if s.endswith("Z"):
+                s = s[:-1] + "+00:00"
+            return datetime.fromisoformat(s).date()
+        except ValueError:
+            try:
+                return date.fromisoformat(s[:10])
+            except ValueError:
+                return None
 
     def _price_for_passenger(
         self,
