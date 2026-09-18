@@ -74,6 +74,13 @@ def apply_markup(plan: QuotePlan, markup: Decimal) -> QuotePlan:
         updates["final_rate_usd"] = (plan.final_rate_usd * factor).quantize(
             Decimal("0.01")
         )
+    # Mantener la misma proporción lista vs promo cuando hay base_rate.
+    if plan.base_rate is not None:
+        updates["base_rate"] = (plan.base_rate * factor).quantize(Decimal("0.01"))
+    if plan.base_rate_usd is not None:
+        updates["base_rate_usd"] = (plan.base_rate_usd * factor).quantize(
+            Decimal("0.01")
+        )
     return plan.model_copy(update=updates)
 
 
