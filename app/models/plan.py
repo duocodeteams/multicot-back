@@ -30,6 +30,7 @@ class Plan(SQLModel, TimestampMixin, table=True):
 
     company: Company = Relationship(back_populates="plans")
     destinations: list["PlanDestination"] = Relationship(back_populates="plan")
+    promotion_links: list["PromotionPlan"] = Relationship(back_populates="plan")
 
     @property
     def total_markup(self) -> Decimal:
