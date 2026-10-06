@@ -277,6 +277,7 @@ class NewTravelQuoteProvider:
         )
         coverage_amount = self._extract_coverage_from_benefits(benefits)
 
+        # New Travel informa el total solo en ARS; no hay tarifa USD ni tipo de cambio.
         return QuotePlan(
             company=self.company_name,
             id=plan_id_str,
@@ -285,9 +286,10 @@ class NewTravelQuoteProvider:
             coverage_amount=coverage_amount,
             benefits=benefits,
             net_rate=amount,
-            final_rate_usd=amount,
+            final_rate_usd=None,
             exchange_rate=Decimal("1"),
             final_rate=amount,
+            base_rate_usd=None,
         )
 
     def _parse_price(self, value: Any) -> Decimal | None:
