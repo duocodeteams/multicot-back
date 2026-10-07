@@ -7,6 +7,7 @@ from app.models.agency import (
 from app.models.base import TimestampMixin
 from app.models.company import Company
 from app.models.plan import Plan, PlanDestination
+from app.models.promotion import Promotion, PromotionPlan
 from app.models.seller import Seller
 from app.models.user import User, UserRole
 
@@ -22,4 +23,6 @@ __all__ = [
     "Company",
     "Plan",
     "PlanDestination",
+    "Promotion",
+    "PromotionPlan",
 ]

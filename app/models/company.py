@@ -14,3 +14,4 @@ class Company(SQLModel, TimestampMixin, table=True):
     active: bool = Field(default=True)
 
     plans: list["Plan"] = Relationship(back_populates="company")
+    promotions: list["Promotion"] = Relationship(back_populates="company")
