@@ -10,7 +10,7 @@
 
 @agente_emisor_guid = 52fc1910575c47b2c353d53c0f24035a
 @email = info@biantravel.com
-
+@agente_emisor_secreto = {{$dotenv CARDINAL_AGENTE_EMISOR_SECRETO}}
 # Pegá acá el id de "Argentina" de la respuesta de /parametros origenes
 @origen_id = 6
 
@@ -95,4 +95,15 @@ Content-Type: application/json
   "email": "{{email}}",
   "localeId": 1,
   "prestaciones": "cotizador"
+}
+
+### Parámetros — usuarios
+POST {{base_url}}/parametros
+Content-Type: application/json
+
+{
+  "agenteEmisorGuid": "{{agente_emisor_guid}}",
+  "agenteEmisorSecreto": "{{agente_emisor_secreto}}",
+  "parametros": "usuarios",
+  "localeId": 1
 }
