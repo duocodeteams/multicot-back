@@ -284,17 +284,17 @@ class OmintQuoteProvider:
         if not product_code and not product_id:
             return None
 
-        # API real: basePrice / finalPrice (strings formato AR).
-        # El manual menciona netPrice/grossPrice; se aceptan como fallback.
-        base_rate = _parse_omint_amount(
-            product.get("basePrice")
-            if product.get("basePrice") not in (None, "")
-            else product.get("grossPrice")
+        # ARS: basePriceAmount / finalPriceAmount (numéricos).
+        # Fallback: basePrice / finalPrice (strings formato AR) y, si no, grossPrice / netPrice.
+        base_rate = _first_omint_amount(
+            product.get("basePriceAmount"),
+            product.get("basePrice"),
+            product.get("grossPrice"),
         )
-        final_rate = _parse_omint_amount(
-            product.get("finalPrice")
-            if product.get("finalPrice") not in (None, "")
-            else product.get("netPrice")
+        final_rate = _first_omint_amount(
+            product.get("finalPriceAmount"),
+            product.get("finalPrice"),
+            product.get("netPrice"),
         )
         if final_rate <= 0 and base_rate <= 0:
             logger.debug(
@@ -306,9 +306,13 @@ class OmintQuoteProvider:
 
         if final_rate <= 0:
             final_rate = base_rate
-        # Omint no informa tarifa en USD ni FX; no inventar valores.
-        exchange_rate = Decimal("1")
-        # net_rate: precio final (no hay neto de comisión explícito en B2B).
+
+        # USD: original*Amount cuando originalCurrencyCode es USD.
+        # Si la respuesta vieja no los trae, los campos USD quedan vacíos.
+        final_rate_usd, base_rate_usd, exchange_rate = _omint_usd_prices(
+            product, final_rate
+        )
+        # net_rate: precio final en ARS (no hay neto de comisión explícito en B2B).
         net_rate = final_rate
 
         discount_pct = _parse_omint_amount(product.get("promotionPercentage"))
@@ -332,10 +336,10 @@ class OmintQuoteProvider:
             coverage_amount=coverage_amount,
             benefits=benefits,
             net_rate=net_rate.quantize(Decimal("0.01")),
-            final_rate_usd=None,
+            final_rate_usd=final_rate_usd,
             exchange_rate=exchange_rate,
             final_rate=final_rate.quantize(Decimal("0.01")),
-            base_rate_usd=None,
+            base_rate_usd=base_rate_usd,
             base_rate=(
                 base_rate.quantize(Decimal("0.01")) if base_rate > 0 else None
             ),
@@ -343,6 +347,50 @@ class OmintQuoteProvider:
                 discount_pct.quantize(Decimal("0.01")) if discount_pct is not None else None
             ),
         )
+
+
+def _first_omint_amount(*values: Any) -> Decimal:
+    """Primer monto Omint mayor a cero. Ignora null y strings vacíos."""
+    for value in values:
+        if value in (None, ""):
+            continue
+        amount = _parse_omint_amount(value)
+        if amount > 0:
+            return amount
+    return Decimal("0")
+
+
+def _omint_usd_prices(
+    product: dict[str, Any], final_rate_ars: Decimal
+) -> tuple[Decimal | None, Decimal | None, Decimal]:
+    """USD de lista, USD final y tipo de cambio. Sin USD, TC queda en 1."""
+    original_currency = str(product.get("originalCurrencyCode") or "").strip().upper()
+    if original_currency and original_currency != "USD":
+        return None, None, Decimal("1")
+
+    final_usd = _first_omint_amount(product.get("originalFinalPriceAmount"))
+    base_usd = _first_omint_amount(
+        product.get("originalBasePriceAmount"),
+        product.get("originalGrossPriceAmount"),
+    )
+    if final_usd <= 0:
+        final_usd = base_usd
+    if final_usd <= 0:
+        return None, None, Decimal("1")
+
+    exchange_rate = _first_omint_amount(product.get("currencyRate"))
+    if exchange_rate <= 0 and final_rate_ars > 0:
+        exchange_rate = (final_rate_ars / final_usd).quantize(Decimal("0.0001"))
+    elif exchange_rate <= 0:
+        exchange_rate = Decimal("1")
+    else:
+        exchange_rate = exchange_rate.quantize(Decimal("0.0001"))
+
+    return (
+        final_usd.quantize(Decimal("0.01")),
+        base_usd.quantize(Decimal("0.01")) if base_usd > 0 else None,
+        exchange_rate,
+    )
 
 
 def _parse_omint_amount(value: Any) -> Decimal:
