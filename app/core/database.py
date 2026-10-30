@@ -4,12 +4,17 @@ from app.core.config import settings
 from app.models import (  # noqa: F401 - registra los modelos en metadata
     Agency,
     Company,
+    EmissionAttempt,
+    Passenger,
+    Payment,
     Plan,
     PlanDestination,
     Promotion,
     PromotionPlan,
+    Sale,
     Seller,
     User,
+    Voucher,
 )
 
 engine = create_engine(

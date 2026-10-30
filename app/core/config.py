@@ -105,6 +105,8 @@ class Settings(BaseSettings):
     omint_quote_url: str = (
         "https://api.omintassistance.com.ar/Quotation/CreateQuotationB2B"
     )
+    # AssignProduct y GET /Quotation/{id}. La cotización sigue en omint_quote_url.
+    omint_api_base_url: str = "https://api.omintassistance.com.ar"
     omint_client_id: str = ""
     omint_client_secret: str = ""
     omint_scope: str = "OACoreApi IntegrationWebApi"
@@ -113,6 +115,10 @@ class Settings(BaseSettings):
     omint_market_id: str = ""
     # Días máx. por viaje en planes anuales (30 | 45 | 60)
     omint_annual_quantity_of_days: int = 30
+    # URL pública de esta API, sin barra final. Omint notifica el pago en
+    # {public_api_base_url}/v1/sales/{id}/omint/payment-notification.
+    # Vacío: no se puede abrir el checkout.
+    public_api_base_url: str = ""
 
 
 def get_cardinal_destino_ids(settings: Settings) -> dict[int, int]:

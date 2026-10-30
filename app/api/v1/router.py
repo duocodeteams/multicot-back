@@ -1,6 +1,6 @@
 from fastapi import APIRouter
 
-from app.api.v1 import agencies, auth, companies, plans, promotions, quotes, sellers, users
+from app.api.v1 import agencies, auth, companies, plans, promotions, quotes, sales, sellers, users
 
 router = APIRouter(prefix="/v1")
 
@@ -12,3 +12,4 @@ router.include_router(companies.router, prefix="/companies", tags=["Companies"])
 router.include_router(plans.router, prefix="/plans", tags=["Plans"])
 router.include_router(promotions.router, prefix="/promotions", tags=["Promotions"])
 router.include_router(quotes.router, prefix="/quotes", tags=["Quotes"])
+router.include_router(sales.router, prefix="/sales", tags=["Sales"])
