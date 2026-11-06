@@ -6,6 +6,7 @@ from app.models.agency import (
 )
 from app.models.base import TimestampMixin
 from app.models.company import Company
+from app.models.company_credential import CompanyCredential
 from app.models.plan import Plan, PlanDestination
 from app.models.promotion import Promotion, PromotionPlan
 from app.models.sale import (
@@ -33,6 +34,7 @@ __all__ = [
     "UserRole",
     "TimestampMixin",
     "Company",
+    "CompanyCredential",
     "Plan",
     "PlanDestination",
     "Promotion",

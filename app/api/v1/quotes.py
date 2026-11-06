@@ -22,4 +22,4 @@ def create_quote(
     Cotiza con las compañías activas. Aplica catálogo (whitelist + markup) si hay planes cargados.
     Requiere autenticación.
     """
-    return get_quotes(session, request)
+    return get_quotes(session, request, current_user)

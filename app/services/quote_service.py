@@ -3,6 +3,8 @@ import logging
 
 from sqlmodel import Session
 
+from app.credentials.service import resolve_cardinal_credentials
+from app.models.user import User
 from app.plans.catalog import filter_and_markup_plans, load_catalogs
 from app.quotations.schemas import QuotePlan, QuoteRequest, QuoteResponse
 from app.services.companies.cardinal import CardinalQuoteProvider
@@ -29,7 +31,11 @@ _PROVIDERS = [
 ]
 
 
-def get_quotes(session: Session, request: QuoteRequest) -> QuoteResponse:
+def get_quotes(
+    session: Session,
+    request: QuoteRequest,
+    user: User | None = None,
+) -> QuoteResponse:
     """
     Obtiene cotizaciones de las compañías activas y las devuelve unificadas.
     El catálogo local filtra por destino y aplica markup cuando hay planes cargados.
@@ -45,7 +51,13 @@ def get_quotes(session: Session, request: QuoteRequest) -> QuoteResponse:
             )
             continue
         try:
-            quoted = provider.get_quotes(request)
+            if provider.company_slug == "cardinal":
+                quoted = provider.get_quotes(
+                    request,
+                    credentials=resolve_cardinal_credentials(session, user),
+                )
+            else:
+                quoted = provider.get_quotes(request)
         except Exception as exc:
             logger.warning(
                 "Proveedor %s falló: %s",
