@@ -29,14 +29,16 @@ _DESTINATION_BY_CODE = {code: destination_id for destination_id, code in _DESTIN
 _TRIP_BY_PRODUCT_TYPE = {code: trip_type for trip_type, code in _PRODUCT_TYPE_MAP.items()}
 
 
-# Canales que exigen quotationPaymentMethodFinancingId (guía del 15/09/2026).
-FINANCING_REQUIRED_CODES = frozenset({"NPS", "DL", "PWY", "GNET"})
+# Tarjetas del acuerdo 3308. Exigen quotationPaymentMethodFinancingId.
+# MP (Mercado Pago) no está: no tiene cuotas. Los id salen en cada cotización.
+FINANCING_REQUIRED_CODES = frozenset({"TVI", "TMA", "TAM", "TVD", "TNA"})
 
-# Pendiente de Omint (mail a DES_OA, sin respuesta todavía):
-# - el JSON que envían a urlNotificacion
-# - si traen un header para verificar que el aviso es de ellos
-# Hasta entonces la URL de notificación lleva el id de la venta y no se interpreta el cuerpo.
-# ConfirmPayment es el que dice si el pago está acreditado.
+# urlNotificacion solo llega con Mercado Pago. El POST trae IdStatus
+# (1 iniciada, 2 aprobada, 3 rechazada, 4 pendiente), Descripcion y Message.
+# No hay header ni firma, y el body no trae la cotización: el id va en nuestra URL.
+# Es un aviso. El voucher lo confirma GET ConfirmPayment.
+# Con tarjeta, Omint no avisa: el panel vuelve a urlOk, urlError o urlPendiente
+# y desde ahí llama a ConfirmPayment.
 
 # GUID que pasó Omint para AssignPassangers. Se comparan sin distinguir mayúsculas.
 DOCUMENT_TYPE_IDS = {

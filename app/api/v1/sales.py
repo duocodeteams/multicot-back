@@ -1,5 +1,6 @@
 from typing import Annotated
 
+import json
 import logging
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
@@ -35,6 +36,16 @@ from app.sales.service import (
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
+
+
+def _notification_fields(raw: bytes) -> tuple[object, object]:
+    try:
+        payload = json.loads(raw)
+    except (json.JSONDecodeError, UnicodeDecodeError):
+        return None, None
+    if not isinstance(payload, dict):
+        return None, None
+    return payload.get("IdStatus"), payload.get("Descripcion")
 
 
 @router.post("", response_model=SaleResponse)
@@ -144,18 +155,20 @@ async def omint_payment_notification(
     request: Request,
     session: Annotated[Session, Depends(get_session)],
 ) -> PaymentConfirmResponse:
-    """Aviso de Omint. No exige login: lo llama su servidor.
+    """Aviso de Mercado Pago. No exige login: lo llama el servidor de Omint.
 
-    Falta el contrato del cuerpo y un header para verificar el origen
-    (pedido a DES_OA, sin respuesta). La venta sale de la URL. No se guarda
-    el cuerpo hasta saber qué mandan. El estado real lo dice ConfirmPayment.
+    El body trae IdStatus, Descripcion y Message, sin firma ni id de cotización.
+    La venta sale de la URL. No se guarda el cuerpo. El voucher lo dice ConfirmPayment.
+    Con tarjeta este aviso no llega: el panel confirma al volver de la pasarela.
     """
     raw = await request.body()
+    status_id, description = _notification_fields(raw)
     logger.info(
-        "omint payment notification sale_id=%s bytes=%s content_type=%s",
+        "omint payment notification sale_id=%s bytes=%s id_status=%s descripcion=%s",
         sale_id,
         len(raw),
-        request.headers.get("content-type"),
+        status_id,
+        description,
     )
     try:
         return confirm_omint_payment_from_notification(session, sale_id)

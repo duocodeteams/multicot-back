@@ -63,8 +63,8 @@ La respuesta incluye `payment_methods`:
 
 - `id`: se manda al abrir el pago.
 - `code`
-- `requires_financing`: si es true, hay que mandar `financing_id`.
-- `financing`: `{ "id", "dues" }`.
+- `requires_financing`: si es true, hay que mandar `financing_id`. En el acuerdo 3308 es true para Visa (`TVI`), Mastercard (`TMA`), American Express (`TAM`), Visa Débito (`TVD`) y Tarjeta Naranja (`TNA`). Mercado Pago (`MP`) no pide cuotas.
+- `financing`: `{ "id", "dues" }`. Esos id cambian en cada cotización.
 
 ## Pago
 
@@ -84,10 +84,12 @@ La respuesta incluye `payment_methods`:
 
 La respuesta trae `checkout_url` y `created`. Si ya había un checkout pendiente, `created` es false y la URL es la misma. No se abre otro cobro.
 
-`POST /v1/sales/{id}/payment/confirm` se puede repetir.
+`POST /v1/sales/{id}/payment/confirm` se puede repetir. Hay que llamarlo al volver de cualquiera de las tres URLs, también de error y pendiente. Volver a la URL no alcanza.
 
 - `payment_received: true`: vienen `voucher_number` y `voucher_url`. La venta queda `issued` y el pago `approved`.
 - `payment_received: false`: sigue en `pending`. No hay que volver a llamar a `POST /payment`.
+
+Con tarjeta, Omint no avisa al backend: la confirmación la hace el panel al volver. Con Mercado Pago, Omint también hace un POST a esta API. Ese aviso no trae el voucher. El panel igual confirma cuando el pasajero vuelve.
 
 ## Retomar
 

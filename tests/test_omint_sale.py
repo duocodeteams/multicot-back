@@ -427,7 +427,7 @@ class SetPassengersTest(TestCase):
         methods = [
             {
                 "id": "44444444-4444-4444-4444-444444444444",
-                "code": "gnet",
+                "code": "tvi",
                 "financing": [{"id": "55555555-5555-5555-5555-555555555555", "dues": "1"}],
                 "extra": "no sale",
             },
@@ -454,12 +454,12 @@ class SetPassengersTest(TestCase):
             "5C9D2946-99DA-4235-80CD-8375B852390F",
         )
         self.session.refresh(sale)
-        self.assertEqual(sale.provider_context["payment_methods"][0]["code"], "gnet")
+        self.assertEqual(sale.provider_context["payment_methods"][0]["code"], "tvi")
         dumped = response.model_dump()
         self.assertNotIn("quotation_id", dumped)
         self.assertEqual(len(response.payment_methods), 1)
         method = response.payment_methods[0]
-        self.assertEqual(method.code, "GNET")
+        self.assertEqual(method.code, "TVI")
         self.assertTrue(method.requires_financing)
         self.assertEqual(method.financing[0].dues, 1)
         self.assertNotIn("extra", method.model_dump())
@@ -543,6 +543,36 @@ class StartPaymentTest(TestCase):
                 )
         self.assertEqual(raised.exception.status_code, 400)
 
+    def test_mercadopago_does_not_require_financing(self) -> None:
+        sale = self._ready_sale()
+        sale.provider_context = {
+            **sale.provider_context,
+            "payment_methods": [
+                {"id": "44444444-4444-4444-4444-444444444444", "code": "MP"},
+            ],
+        }
+        self.session.add(sale)
+        self.session.commit()
+        checkout = OmintCheckout(
+            request_body={},
+            response_body={"paymentUrl": "https://gateway.test/mp"},
+            status_code=200,
+            payment_url="https://gateway.test/mp",
+        )
+        with patch("app.sales.service.get_settings") as settings, patch(
+            "app.sales.service.start_omint_checkout",
+            return_value=checkout,
+        ) as mocked:
+            settings.return_value.public_api_base_url = "https://api.test"
+            result = start_omint_payment(
+                self.session,
+                self.admin,
+                sale.id,
+                _payment_form(financing_id=None),
+            )
+        self.assertTrue(result.created)
+        self.assertIsNone(mocked.call_args.args[2])
+
     def test_unpaid_confirmation_does_not_open_another_payment(self) -> None:
         sale = self._ready_sale()
         self._mark_pending(sale)
@@ -583,7 +613,7 @@ class StartPaymentTest(TestCase):
         sale = self._ready_sale()
         detail = get_omint_sale(self.session, self.admin, sale.id)
         self.assertEqual(detail.emission_status, EmissionStatus.PASSENGERS_COMPLETE.value)
-        self.assertEqual(detail.payment_methods[0].code, "GNET")
+        self.assertEqual(detail.payment_methods[0].code, "TVI")
         self.assertIsNone(detail.checkout_url)
         self.assertIsNone(detail.voucher_number)
         self.assertNotIn("quotation_id", detail.model_dump())
@@ -638,7 +668,7 @@ class StartPaymentTest(TestCase):
             "payment_methods": [
                 {
                     "id": "44444444-4444-4444-4444-444444444444",
-                    "code": "GNET",
+                    "code": "TVI",
                     "financing": [{"id": "55555555-5555-5555-5555-555555555555", "dues": 1}],
                 }
             ],

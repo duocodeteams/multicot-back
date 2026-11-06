@@ -358,7 +358,7 @@ def confirm_omint_payment_from_notification(
     session: Session,
     sale_id: int,
 ) -> PaymentConfirmResponse:
-    """La llama el aviso de Omint. El cuerpo del aviso todavía no tiene contrato."""
+    """Aviso de Mercado Pago. El estado real lo dice ConfirmPayment, no el body."""
     sale = session.get(Sale, sale_id)
     if sale is None:
         raise SaleFlowError(404, "No encontramos esa venta")
