@@ -53,6 +53,12 @@ class GoAssistanceQuoteProvider:
             )
             return []
 
+        # La cotización solo tiene Edad1..Edad5. Con más pasajeros el precio
+        # ignoraría al resto, así que no se ofrece el producto.
+        if len(request.ages) > 5:
+            logger.debug("GoAssistance: más de 5 pasajeros no soportado por el WS")
+            return []
+
         base_url = self._settings.go_assistance_base_url.rstrip("/")
         edades = self._edades_to_edad1_5(request.ages)
 
