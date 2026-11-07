@@ -7,13 +7,42 @@ from typing import Literal
 from pydantic import BaseModel, EmailStr, Field, model_validator
 
 DocumentType = Literal["dni", "passport", "cuit"]
+TripType = Literal["unico_viaje", "multiviaje", "larga_estadia"]
+SimulatePaymentResult = Literal["pending", "approved", "rejected"]
+
+
+class InterAssistQuoteSnapshot(BaseModel):
+    """Datos del viaje ya cotizado. Inter Assist no guarda cotización remota."""
+
+    departure_date: date
+    return_date: date | None = None
+    ages: list[int] = Field(min_length=1)
+    origin: str = Field(default="AR", min_length=2, max_length=16)
+    destination_id: int
+    trip_type: TripType
+    days_range: int | None = None
+    amount: Decimal = Field(gt=0)
+    currency: str = Field(min_length=3, max_length=3)
+    plan_name: str = Field(min_length=1, max_length=200)
+    promocion_id: int = Field(default=0, ge=0)
+    markup: Decimal = Field(default=Decimal("0"))
+    net_amount: Decimal | None = None
+    base_amount: Decimal | None = None
 
 
 class SaleCreate(BaseModel):
-    """El `quote_id` es el `id` que devolvió la cotización (`quotationId|productId`)."""
+    """Omint: `quote_id` = `quotationId|productId`. Inter Assist: `quote_id` = plan_id + `quote`."""
 
-    company: str = Field(description="Slug o nombre de la compañía. En este corte, solo Omint.")
-    quote_id: str = Field(min_length=3)
+    company: str = Field(description="Slug de la compañía: omint o inter_assist.")
+    quote_id: str = Field(min_length=1)
+    quote: InterAssistQuoteSnapshot | None = None
+
+    @model_validator(mode="after")
+    def inter_assist_requires_quote(self) -> "SaleCreate":
+        slug = self.company.strip().lower().replace(" ", "_")
+        if slug in {"inter_assist", "interassist"} and self.quote is None:
+            raise ValueError("Inter Assist requiere el snapshot del viaje en `quote`")
+        return self
 
 
 class SaleResponse(BaseModel):
@@ -172,13 +201,19 @@ class CatalogResponse(BaseModel):
 
 
 class PaymentStart(BaseModel):
-    """Medio elegido de los que devolvió AssignPassangers. Las URLs son del panel."""
+    """Omint: medio de AssignPassangers. Inter Assist (simulado): payment_method_id opcional."""
 
-    payment_method_id: str = Field(min_length=1, max_length=80)
+    payment_method_id: str = Field(default="simulated", min_length=1, max_length=80)
     financing_id: str | None = Field(default=None, max_length=80)
     return_url_ok: str = Field(min_length=8, max_length=2000)
     return_url_error: str = Field(min_length=8, max_length=2000)
     return_url_pending: str = Field(min_length=8, max_length=2000)
+
+
+class PaymentSimulate(BaseModel):
+    """Mueve el pago simulado a pending, approved o rejected."""
+
+    result: SimulatePaymentResult
 
 
 class PaymentResponse(BaseModel):
