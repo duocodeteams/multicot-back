@@ -18,6 +18,7 @@ import httpx
 logger = logging.getLogger(__name__)
 
 from app.core.config import get_cardinal_destino_ids, get_settings
+from app.credentials.schemas import CardinalCredentials
 from app.quotations.schemas import Benefit, QuotePlan, QuoteRequest, TRIP_TYPE_MULTIVIAJE
 
 # Origen del cotizador → nombre en Cardinal para resolver vía /parametros.
@@ -34,9 +35,14 @@ class CardinalQuoteProvider:
         self._settings = get_settings()
         self._destino_ids = get_cardinal_destino_ids(self._settings)
 
-    def get_quotes(self, request: QuoteRequest) -> list[QuotePlan]:
-        if not self._settings.cardinal_agente_emisor_guid:
-            logger.debug("Cardinal: sin CARDINAL_AGENTE_EMISOR_GUID configurado")
+    def get_quotes(
+        self,
+        request: QuoteRequest,
+        credentials: CardinalCredentials | None = None,
+    ) -> list[QuotePlan]:
+        guid = self._agente_emisor_guid(credentials)
+        if not guid:
+            logger.debug("Cardinal: sin agente emisor para esta cotización")
             return []
 
         destino_id = self._destino_ids.get(request.destination_id)
@@ -47,7 +53,7 @@ class CardinalQuoteProvider:
             )
             return []
 
-        origen_id = self._resolve_origen_id(request.origin)
+        origen_id = self._resolve_origen_id(request.origin, guid)
         if origen_id is None:
             logger.warning(
                 "Cardinal: no se pudo resolver origen '%s' a Cardinal origenId",
@@ -57,7 +63,7 @@ class CardinalQuoteProvider:
 
         tarifa_anual = request.trip_type == TRIP_TYPE_MULTIVIAJE
         body: dict[str, Any] = {
-            "agenteEmisorGuid": self._settings.cardinal_agente_emisor_guid,
+            "agenteEmisorGuid": guid,
             "origenId": origen_id,
             "destinoId": destino_id,
             "fechaSalida": request.departure_date.isoformat(),
@@ -107,14 +113,19 @@ class CardinalQuoteProvider:
                 plans.append(plan)
         return plans
 
-    def _resolve_origen_id(self, origin: str) -> int | None:
+    def _agente_emisor_guid(self, credentials: CardinalCredentials | None) -> str:
+        if credentials is not None:
+            return credentials.agente_emisor_guid.strip()
+        return self._settings.cardinal_agente_emisor_guid.strip()
+
+    def _resolve_origen_id(self, origin: str, agente_emisor_guid: str) -> int | None:
         """Obtiene origenId de Cardinal vía /parametros. Por ahora solo 'AR' → Argentina."""
         if origin != "AR":
             return None
         base_url = self._settings.cardinal_base_url.rstrip("/")
         with httpx.Client(timeout=15.0) as client:
             body = {
-                "agenteEmisorGuid": self._settings.cardinal_agente_emisor_guid,
+                "agenteEmisorGuid": agente_emisor_guid,
                 "parametros": "origenes",
                 "localeId": 1,
             }

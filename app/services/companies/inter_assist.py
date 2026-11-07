@@ -79,22 +79,43 @@ class InterAssistQuoteProvider:
     def get_quotes(self, request: QuoteRequest) -> list[QuotePlan]:
         settings = self._settings
         if not settings.interassist_api_key:
+            logger.info("InterAssist COTIZAR skip: falta INTERASSIST_API_KEY")
             return []
 
         destino_id = _DESTINATION_TO_INTERASSIST.get(request.destination_id)
         if destino_id is None:
+            logger.info(
+                "InterAssist COTIZAR skip: destination_id=%s sin mapeo",
+                request.destination_id,
+            )
             return []
 
         if request.origin != "AR":
+            logger.info("InterAssist COTIZAR skip: origin=%s (solo AR)", request.origin)
             return []
 
         trip_days = (request.return_date - request.departure_date).days + 1
         if trip_days < 1:
+            logger.info("InterAssist COTIZAR skip: trip_days=%s inválido", trip_days)
             return []
 
         base_url = settings.interassist_base_url.rstrip("/")
+        key = settings.interassist_api_key.strip()
+        key_tail = key[-6:] if len(key) >= 6 else "(vacía)"
+        logger.info(
+            "InterAssist COTIZAR request base_url=%s key_tail=...%s "
+            "origin=%s dest=%s destino_ia=%s trip_type=%s days=%s ages=%s",
+            base_url,
+            key_tail,
+            request.origin,
+            request.destination_id,
+            destino_id,
+            request.trip_type,
+            trip_days,
+            list(request.ages),
+        )
         headers = {
-            "Authorization": f"Bearer {settings.interassist_api_key}",
+            "Authorization": f"Bearer {key}",
             "Accept": "application/json",
         }
 
@@ -127,6 +148,12 @@ class InterAssistQuoteProvider:
             if plan:
                 plans.append(plan)
 
+        logger.info(
+            "InterAssist COTIZAR result raw_plans=%s quoted=%s ids=%s",
+            len(raw_plans),
+            len(plans),
+            [p.plan_id for p in plans[:20]],
+        )
         return plans
 
     def _fetch_all_plans(
@@ -141,10 +168,18 @@ class InterAssistQuoteProvider:
 
         while page <= _MAX_PAGES:
             url = f"{base_url}/api/planes"
+            logger.info("InterAssist GET %s?page=%s", url, page)
             response = client.get(
                 url,
                 headers=headers,
                 params={"page": page},
+            )
+            body_preview = (response.text or "")[:2000]
+            logger.info(
+                "InterAssist RESPONSE page=%s status=%s body=%s",
+                page,
+                response.status_code,
+                body_preview,
             )
             if response.status_code >= 400:
                 logger.error(
@@ -175,7 +210,11 @@ class InterAssistQuoteProvider:
                 pass
             page += 1
 
-        logger.debug("InterAssist: planes obtenidos=%s pages_fetched=%s", len(all_plans), page - 1)
+        logger.info(
+            "InterAssist: planes obtenidos=%s pages_fetched=%s",
+            len(all_plans),
+            page - 1,
+        )
         return all_plans
 
     def _annual_price_keys(self, bracket: int, age_suffix: str) -> tuple[str, ...]:

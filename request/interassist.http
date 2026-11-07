@@ -90,3 +90,141 @@ Accept: application/json
   "destination_id": 2,
   "trip_type": "multiviaje"
 }
+
+### Inter Assist — emitir-externa (API externa; no cotiza)
+POST {{interassistBaseUrl}}/api/ventas/emitir-externa
+Accept: application/json
+Authorization: Bearer {{interassistToken}}
+Content-Type: application/json
+
+{
+  "type": 0,
+  "plan_id": 802,
+  "promocion_id": 0,
+  "data_inicial": "20/06/2026",
+  "data_final": "27/06/2026",
+  "clientes": [
+    {
+      "nombre": "Maria",
+      "apellido": "Garcia",
+      "fecha_nacimiento": "15/03/1990",
+      "email": "maria.garcia@example.com",
+      "dni": "30123456",
+      "telefono": "1144556677"
+    }
+  ]
+}
+
+### App — países Inter Assist (REST Countries)
+GET {{appBaseUrl}}/v1/sales/inter_assist/countries
+Authorization: Bearer {{appToken}}
+Accept: application/json
+
+### App — provincias AR Inter Assist (Georef)
+GET {{appBaseUrl}}/v1/sales/inter_assist/countries/AR/provinces
+Authorization: Bearer {{appToken}}
+Accept: application/json
+
+### App — provincias otro país (vacío)
+GET {{appBaseUrl}}/v1/sales/inter_assist/countries/BR/provinces
+Authorization: Bearer {{appToken}}
+Accept: application/json
+
+### App — abrir venta Inter Assist
+# Reemplazar quote_id/amount/plan_name con un plan real de POST /v1/quotes
+POST {{appBaseUrl}}/v1/sales
+Authorization: Bearer {{appToken}}
+Content-Type: application/json
+Accept: application/json
+
+{
+  "company": "inter_assist",
+  "quote_id": "802",
+  "quote": {
+    "departure_date": "2026-06-20",
+    "return_date": "2026-06-27",
+    "ages": [35],
+    "origin": "AR",
+    "destination_id": 3,
+    "trip_type": "unico_viaje",
+    "amount": "120.50",
+    "currency": "USD",
+    "plan_name": "INTER 100",
+    "promocion_id": 0
+  }
+}
+
+### App — pasajeros Inter Assist
+@saleId = 1
+POST {{appBaseUrl}}/v1/sales/{{saleId}}/passengers
+Authorization: Bearer {{appToken}}
+Content-Type: application/json
+Accept: application/json
+
+{
+  "receive_promotions": false,
+  "emergency_contact": {
+    "first_name": "Luis",
+    "last_name": "Perez",
+    "phone": "+5491100000001",
+    "email": "luis.perez@example.com"
+  },
+  "passengers": [
+    {
+      "is_holder": true,
+      "first_name": "Maria",
+      "last_name": "Garcia",
+      "birth_date": "1991-03-15",
+      "document_type": "dni",
+      "document_number": "30123456",
+      "email": "maria.garcia@example.com",
+      "phone": "1144556677",
+      "country_id": "AR",
+      "province_id": "BA",
+      "country": "Argentina",
+      "province": "Buenos Aires",
+      "street": "Av. Ejemplo",
+      "street_number": "123",
+      "city": "Buenos Aires"
+    }
+  ]
+}
+
+### App — iniciar pago simulado
+POST {{appBaseUrl}}/v1/sales/{{saleId}}/payment
+Authorization: Bearer {{appToken}}
+Content-Type: application/json
+Accept: application/json
+
+{
+  "payment_method_id": "simulated",
+  "return_url_ok": "https://panel.example/ok",
+  "return_url_error": "https://panel.example/error",
+  "return_url_pending": "https://panel.example/pendiente"
+}
+
+### App — simular pago aprobado
+POST {{appBaseUrl}}/v1/sales/{{saleId}}/payment/simulate
+Authorization: Bearer {{appToken}}
+Content-Type: application/json
+Accept: application/json
+
+{
+  "result": "approved"
+}
+
+### App — confirmar pago (emite en Inter Assist si approved)
+POST {{appBaseUrl}}/v1/sales/{{saleId}}/payment/confirm
+Authorization: Bearer {{appToken}}
+Accept: application/json
+
+### App — retomar venta
+GET {{appBaseUrl}}/v1/sales/{{saleId}}
+Authorization: Bearer {{appToken}}
+Accept: application/json
+
+### App — PDF voucher Inter Assist (proxy; requiere JWT)
+# No abrir la URL de api-staging.interassist.com en el browser: pide API Key → 401.
+GET {{appBaseUrl}}/v1/sales/{{saleId}}/voucher/pdf?lang=es
+Authorization: Bearer {{appToken}}
+Accept: application/pdf
