@@ -62,6 +62,7 @@ from app.services.companies.inter_assist_emission import (
 from app.services.companies.omint_emission import (
     DOCUMENT_TYPE_IDS,
     FINANCING_REQUIRED_CODES,
+    PAYMENT_METHOD_NAMES,
     OmintAssignFailed,
     OmintEmergencyDraft,
     OmintEmissionError,
@@ -1372,6 +1373,7 @@ def _payment_method_options(sale: Sale) -> list[PaymentMethodOption]:
             PaymentMethodOption(
                 id=method_id[:80],
                 code=code[:40],
+                name=PAYMENT_METHOD_NAMES.get(code, code)[:80],
                 requires_financing=code in FINANCING_REQUIRED_CODES,
                 financing=_financing_options(method.get("financing")),
             )
