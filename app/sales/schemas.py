@@ -30,10 +30,18 @@ class InterAssistQuoteSnapshot(BaseModel):
     base_amount: Decimal | None = None
 
 
-class SaleCreate(BaseModel):
-    """Omint: `quote_id` = `quotationId|productId`. Inter Assist: `quote_id` = plan_id + `quote`."""
+class IssuedVoucher(BaseModel):
+    """Un voucher emitido. Cardinal devuelve uno por pasajero."""
 
-    company: str = Field(description="Slug de la compañía: omint o inter_assist.")
+    number: str | None = None
+    url: str | None = None
+    passenger_id: int | None = None
+
+
+class SaleCreate(BaseModel):
+    """Omint y Cardinal: `quote_id` = `cotizacion|producto`. Inter Assist: plan_id + `quote`."""
+
+    company: str = Field(description="Slug de la compañía: omint, inter_assist o cardinal.")
     quote_id: str = Field(min_length=1)
     quote: InterAssistQuoteSnapshot | None = None
 
@@ -189,6 +197,7 @@ class SaleDetailResponse(SaleResponse):
     checkout_url: str | None = None
     voucher_number: str | None = None
     voucher_url: str | None = None
+    vouchers: list[IssuedVoucher] = Field(default_factory=list)
 
 
 class CatalogItem(BaseModel):
@@ -231,3 +240,4 @@ class PaymentConfirmResponse(BaseModel):
     payment_received: bool
     voucher_number: str | None
     voucher_url: str | None
+    vouchers: list[IssuedVoucher] = Field(default_factory=list)

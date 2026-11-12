@@ -122,7 +122,14 @@ def delete_agency_credential(session: Session, agency_id: int, company_slug: str
 
 def resolve_cardinal_credentials(session: Session, user: User | None) -> CardinalCredentials:
     """Credencial de la agencia del usuario, o la genérica de Settings."""
-    agency_id = agency_id_for_user(session, user)
+    return resolve_cardinal_credentials_for_agency(session, agency_id_for_user(session, user))
+
+
+def resolve_cardinal_credentials_for_agency(
+    session: Session,
+    agency_id: int | None,
+) -> CardinalCredentials:
+    """Credencial de esa agencia, o la genérica de Settings si no tiene fila."""
     if agency_id is None:
         return _cardinal_from_settings()
 

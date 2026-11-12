@@ -13,6 +13,7 @@ from sqlalchemy.orm.attributes import flag_modified
 from sqlmodel import Session, select
 
 from app.core.config import get_settings
+from app.credentials.service import resolve_cardinal_credentials_for_agency
 from app.models.company import Company
 from app.models.plan import Plan
 from app.models.sale import (
@@ -43,8 +44,17 @@ from app.sales.schemas import (
     PaymentResponse,
     PaymentSimulate,
     PaymentStart,
+    IssuedVoucher,
     SaleDetailResponse,
     SaleResponse,
+)
+from app.services.companies.cardinal_emission import (
+    CardinalEmissionError,
+    CardinalPassengerDraft,
+    document_type_id,
+    emit_cardinal_sale,
+    fetch_cardinal_quotation,
+    list_cardinal_parameters,
 )
 from app.services.companies.inter_assist import InterAssistQuoteProvider
 from app.services.companies.inter_assist_catalog import (
@@ -79,6 +89,7 @@ logger = logging.getLogger(__name__)
 
 _OMINT_SLUG = "omint"
 _INTER_ASSIST_SLUG = "inter_assist"
+_CARDINAL_SLUG = "cardinal"
 _SIMULATED_PAYMENT_METHOD = {
     "id": "simulated",
     "code": "SIMULATED",
@@ -631,50 +642,7 @@ def start_inter_assist_payment(
 ) -> PaymentResponse:
     """Abre un cobro simulado (pasarela propia). No llama a Inter Assist."""
     sale = _payable_inter_assist_sale(session, user, sale_id)
-    _check_return_urls(data)
-    if sale.emission_status == EmissionStatus.ISSUED.value:
-        raise SaleFlowError(409, "Esta venta ya está emitida")
-    existing = _pending_payment(session, sale.id or 0)
-    if existing is not None and existing.checkout_url:
-        return _payment_response(sale, existing.checkout_url, created=False)
-
-    checkout_url = (
-        data.return_url_pending.strip()
-        or data.return_url_ok.strip()
-    )
-    payment = Payment(
-        sale_id=sale.id or 0,
-        provider=PaymentProvider.SIMULATED.value,
-        status=PaymentStatus.PENDING.value,
-        amount=sale.amount,
-        currency=sale.currency,
-        checkout_url=checkout_url[:2000],
-        external_id=(data.payment_method_id or "simulated").strip()[:80],
-        financing_id=None,
-        provider_data={
-            "simulated": True,
-            "return_url_ok": data.return_url_ok.strip(),
-            "return_url_error": data.return_url_error.strip(),
-            "return_url_pending": data.return_url_pending.strip(),
-        },
-    )
-    session.add(payment)
-    sale.payment_status = SalePaymentStatus.PENDING.value
-    sale.updated_at = datetime.utcnow()
-    session.add(sale)
-    _add_attempt(
-        session,
-        sale,
-        step="process_payment",
-        success=True,
-        http_status=200,
-        request_payload={"provider": PaymentProvider.SIMULATED.value},
-        response_payload={"checkout_url": checkout_url},
-        error_message=None,
-    )
-    _commit(session)
-    session.refresh(sale)
-    return _payment_response(sale, checkout_url, created=True)
+    return _start_simulated_payment(session, sale, data)
 
 
 def simulate_inter_assist_payment(
@@ -685,41 +653,7 @@ def simulate_inter_assist_payment(
 ) -> PaymentResponse:
     """Mueve el pago simulado a pending, approved o rejected."""
     sale = _owned_inter_assist_sale(session, user, sale_id)
-    if sale.emission_status == EmissionStatus.ISSUED.value:
-        raise SaleFlowError(409, "Esta venta ya está emitida")
-    payment = _pending_or_latest_simulated_payment(session, sale.id or 0)
-    if payment is None:
-        raise SaleFlowError(409, "No hay un pago simulado para esta venta")
-    if payment.provider != PaymentProvider.SIMULATED.value:
-        raise SaleFlowError(400, "Esta venta no usa la pasarela simulada")
-
-    if data.result == "pending":
-        payment.status = PaymentStatus.PENDING.value
-        sale.payment_status = SalePaymentStatus.PENDING.value
-    elif data.result == "approved":
-        payment.status = PaymentStatus.APPROVED.value
-        sale.payment_status = SalePaymentStatus.APPROVED.value
-    else:
-        payment.status = PaymentStatus.REJECTED.value
-        sale.payment_status = SalePaymentStatus.REJECTED.value
-
-    payment.updated_at = datetime.utcnow()
-    sale.updated_at = datetime.utcnow()
-    session.add(payment)
-    session.add(sale)
-    _add_attempt(
-        session,
-        sale,
-        step="simulate_payment",
-        success=True,
-        http_status=200,
-        request_payload={"result": data.result},
-        response_payload={"payment_status": sale.payment_status},
-        error_message=None,
-    )
-    _commit(session)
-    session.refresh(sale)
-    return _payment_response(sale, payment.checkout_url, created=False)
+    return _simulate_sale_payment(session, sale, data)
 
 
 def confirm_inter_assist_payment(
@@ -739,6 +673,211 @@ def get_inter_assist_sale(session: Session, user: User, sale_id: int) -> SaleDet
     return sale_detail(session, sale, _INTER_ASSIST_SLUG)
 
 
+def open_cardinal_sale(
+    session: Session,
+    user: User,
+    company_name: str,
+    quote_id: str,
+) -> tuple[Sale, bool]:
+    """Congela costoFinal de la cotización de Cardinal. No emite todavía."""
+    if _normalize_company(company_name) != _CARDINAL_SLUG:
+        raise SaleFlowError(400, "La emisión para esta compañía todavía no está disponible")
+    cotizacion_guid, producto_id = _parse_cardinal_quote_id(quote_id)
+    company = session.exec(select(Company).where(Company.slug == _CARDINAL_SLUG)).first()
+    if company is None or company.id is None:
+        raise SaleFlowError(400, "Cardinal no está cargada como compañía")
+    if not company.active:
+        raise SaleFlowError(400, "Cardinal no está activa")
+
+    reference = f"cardinal:{cotizacion_guid}:{producto_id}"
+    existing = session.exec(select(Sale).where(Sale.provider_reference == reference)).first()
+    if existing is not None:
+        if existing.created_by_user_id != user.id:
+            raise SaleFlowError(409, "Esa cotización ya tiene una venta")
+        return existing, False
+
+    seller_id, agency_id = _attribution(session, user)
+    credentials = resolve_cardinal_credentials_for_agency(session, agency_id)
+    try:
+        selection = fetch_cardinal_quotation(credentials, cotizacion_guid, producto_id)
+    except CardinalEmissionError as exc:
+        status = exc.status_code if exc.status_code < 500 else 502
+        raise SaleFlowError(status, exc.detail) from exc
+
+    context = {
+        "cotizacion_guid": selection.cotizacion_guid,
+        "producto_id": selection.producto_id,
+        "monto_cotizado": str(selection.amount),
+        "currency_id": selection.currency_id,
+        "origen_id": selection.origen_id,
+        "destino_id": selection.destino_id,
+    }
+    sale = Sale(
+        created_by_user_id=user.id or 0,
+        agency_id=agency_id,
+        seller_id=seller_id,
+        company_id=company.id,
+        emission_status=EmissionStatus.PRODUCT_SELECTED.value,
+        payment_status=SalePaymentStatus.NOT_STARTED.value,
+        provider_reference=reference,
+        origin=str(selection.origen_id) if selection.origen_id is not None else None,
+        destination_id=selection.destination_id,
+        trip_type=selection.trip_type,
+        days_range=selection.days_range,
+        departure_date=selection.departure_date,
+        return_date=selection.return_date,
+        quoted_ages=list(selection.ages),
+        external_plan_id=str(selection.producto_id)[:80],
+        plan_name=selection.plan_name[:200],
+        plan_id=_local_plan_id(session, company.id, str(selection.producto_id)),
+        currency=selection.currency[:3],
+        amount=selection.amount,
+        base_amount=selection.base_amount,
+        markup=Decimal("0"),
+        provider_context=context,
+    )
+    session.add(sale)
+    session.flush()
+    _add_attempt(
+        session,
+        sale,
+        success=True,
+        http_status=200,
+        request_payload=selection.request_body,
+        response_payload={"monto_cotizado": str(selection.amount), "currency": selection.currency},
+        error_message=None,
+        step="select_product",
+    )
+    try:
+        session.commit()
+    except IntegrityError as exc:
+        session.rollback()
+        raced = session.exec(select(Sale).where(Sale.provider_reference == reference)).first()
+        if raced is None or raced.created_by_user_id != user.id:
+            raise SaleFlowError(409, "Esa cotización ya tiene una venta") from exc
+        return raced, False
+    session.refresh(sale)
+    logger.info(
+        "sale cardinal product_selected sale_id=%s plan=%s amount=%s %s",
+        sale.id,
+        sale.external_plan_id,
+        sale.amount,
+        sale.currency,
+    )
+    return sale, True
+
+
+def set_cardinal_passengers(
+    session: Session,
+    user: User,
+    sale_id: int,
+    data: PassengersCreate,
+) -> PassengersResponse:
+    """Guarda pasajeros. Cardinal los recibe recién en /emitir."""
+    sale = _editable_cardinal_sale(session, user, sale_id)
+    if sale.departure_date is None:
+        raise SaleFlowError(400, "La venta no tiene fecha de salida")
+    quoted_ages = [int(age) for age in (sale.quoted_ages or [])]
+    if len(data.passengers) != len(quoted_ages):
+        raise SaleFlowError(400, "La cantidad de pasajeros tiene que coincidir con la cotización")
+    ages = [_age_on(passenger.birth_date, sale.departure_date) for passenger in data.passengers]
+    if Counter(ages) != Counter(quoted_ages):
+        raise SaleFlowError(400, "Las edades a la fecha de salida no coinciden con la cotización")
+    _require_cardinal_passenger_fields(data)
+
+    credentials = resolve_cardinal_credentials_for_agency(session, sale.agency_id)
+    try:
+        catalog = list_cardinal_parameters(credentials, "tiposDocumentos")
+        type_ids = {
+            passenger.document_type: document_type_id(passenger.document_type, catalog)
+            for passenger in data.passengers
+        }
+    except CardinalEmissionError as exc:
+        status = exc.status_code if exc.status_code < 500 else 502
+        raise SaleFlowError(status, exc.detail) from exc
+
+    _replace_passengers_generic(session, sale, data)
+    for row in session.exec(select(Passenger).where(Passenger.sale_id == sale.id)).all():
+        provider_data = dict(row.provider_data or {})
+        provider_data["document_type_id"] = type_ids[row.document_type]
+        row.provider_data = provider_data
+        flag_modified(row, "provider_data")
+        session.add(row)
+
+    sale.emergency_first_name = data.emergency_contact.first_name.strip()
+    sale.emergency_last_name = data.emergency_contact.last_name.strip()
+    sale.emergency_phone = data.emergency_contact.phone.strip()
+    sale.emergency_email = (
+        str(data.emergency_contact.email) if data.emergency_contact.email else None
+    )
+    sale.emission_status = EmissionStatus.PASSENGERS_COMPLETE.value
+    sale.updated_at = datetime.utcnow()
+    context = dict(sale.provider_context or {})
+    context["receive_promotions"] = data.receive_promotions
+    context["payment_methods"] = [_SIMULATED_PAYMENT_METHOD]
+    sale.provider_context = context
+    flag_modified(sale, "provider_context")
+    session.add(sale)
+    _add_attempt(
+        session,
+        sale,
+        step="assign_passengers",
+        success=True,
+        http_status=200,
+        request_payload={"passengers": len(data.passengers)},
+        response_payload={"payment_methods": [_SIMULATED_PAYMENT_METHOD]},
+        error_message=None,
+    )
+    _commit(session)
+    session.refresh(sale)
+    logger.info("sale cardinal passengers_complete sale_id=%s passengers=%s", sale.id, len(data.passengers))
+    return passengers_response(session, sale)
+
+
+def start_cardinal_payment(
+    session: Session,
+    user: User,
+    sale_id: int,
+    data: PaymentStart,
+) -> PaymentResponse:
+    """Abre un cobro simulado. Cardinal no tiene checkout."""
+    sale = _payable_cardinal_sale(session, user, sale_id)
+    if sale.payment_status == SalePaymentStatus.APPROVED.value:
+        raise SaleFlowError(409, "El pago de esta venta ya está aprobado")
+    return _start_simulated_payment(session, sale, data)
+
+
+def simulate_cardinal_payment(
+    session: Session,
+    user: User,
+    sale_id: int,
+    data: PaymentSimulate,
+) -> PaymentResponse:
+    sale = _owned_cardinal_sale(session, user, sale_id)
+    return _simulate_sale_payment(session, sale, data)
+
+
+def confirm_cardinal_payment(
+    session: Session,
+    user: User,
+    sale_id: int,
+) -> PaymentConfirmResponse:
+    """Si el pago simulado está aprobado, llama a /emitir y guarda un voucher por pasajero."""
+    sale = _owned_cardinal_sale(session, user, sale_id)
+    return _confirm_cardinal_sale(session, sale)
+
+
+def list_cardinal_catalog(session: Session, user: User, parametros: str) -> list[dict[str, str]]:
+    credentials = resolve_cardinal_credentials_for_agency(
+        session, _attribution(session, user)[1]
+    )
+    try:
+        return list_cardinal_parameters(credentials, parametros)
+    except CardinalEmissionError as exc:
+        status = exc.status_code if exc.status_code < 500 else 502
+        raise SaleFlowError(status, exc.detail) from exc
+
+
 def get_sale_for_user(session: Session, user: User, sale_id: int) -> SaleDetailResponse:
     sale = session.get(Sale, sale_id)
     if sale is None:
@@ -752,6 +891,8 @@ def get_sale_for_user(session: Session, user: User, sale_id: int) -> SaleDetailR
         return sale_detail(session, sale, _OMINT_SLUG)
     if company.slug == _INTER_ASSIST_SLUG:
         return sale_detail(session, sale, _INTER_ASSIST_SLUG)
+    if company.slug == _CARDINAL_SLUG:
+        return sale_detail(session, sale, _CARDINAL_SLUG)
     raise SaleFlowError(400, "La emisión para esta compañía todavía no está disponible")
 
 
@@ -773,20 +914,15 @@ def sale_detail(session: Session, sale: Sale, company_slug: str) -> SaleDetailRe
         select(Passenger).where(Passenger.sale_id == sale.id).order_by(Passenger.id)
     ).all()
     pending = _pending_payment(session, sale.id or 0)
-    voucher = None
+    vouchers = []
     if sale.emission_status == EmissionStatus.ISSUED.value:
-        voucher = _voucher_for(session, sale.id or 0)
+        vouchers = _vouchers_for(session, sale.id or 0)
+    voucher = vouchers[0] if vouchers else None
     checkout_url = None
     if pending is not None and sale.payment_status == SalePaymentStatus.PENDING.value:
         checkout_url = pending.checkout_url
     base = sale_to_response(sale, company_slug)
-    voucher_url = None
-    if voucher is not None:
-        voucher_url = (
-            _public_inter_assist_voucher_url(sale.id or 0)
-            if company_slug == _INTER_ASSIST_SLUG
-            else voucher.url
-        )
+    issued = _issued_vouchers(vouchers, company_slug, sale.id or 0)
     return SaleDetailResponse(
         **base.model_dump(),
         emergency_contact=_emergency_contact(sale),
@@ -794,7 +930,8 @@ def sale_detail(session: Session, sale: Sale, company_slug: str) -> SaleDetailRe
         payment_methods=_payment_method_options(sale),
         checkout_url=checkout_url,
         voucher_number=voucher.number if voucher else None,
-        voucher_url=voucher_url,
+        voucher_url=issued[0].url if issued else None,
+        vouchers=issued,
     )
 
 
@@ -1077,6 +1214,258 @@ def _save_inter_assist_voucher(
     return voucher
 
 
+def _confirm_cardinal_sale(session: Session, sale: Sale) -> PaymentConfirmResponse:
+    if sale.emission_status == EmissionStatus.ISSUED.value:
+        vouchers = _vouchers_for(session, sale.id or 0)
+        return _confirm_response(
+            sale,
+            True,
+            vouchers[0] if vouchers else None,
+            company_slug=_CARDINAL_SLUG,
+            vouchers=vouchers,
+        )
+    if sale.payment_status == SalePaymentStatus.REJECTED.value:
+        raise SaleFlowError(409, "El pago de esta venta fue rechazado")
+    if sale.payment_status == SalePaymentStatus.PENDING.value:
+        return _confirm_response(sale, False, None, company_slug=_CARDINAL_SLUG)
+    if sale.payment_status != SalePaymentStatus.APPROVED.value:
+        raise SaleFlowError(409, "El pago de esta venta no está iniciado")
+    if _approved_simulated_payment(session, sale.id or 0) is None:
+        raise SaleFlowError(409, "No hay un pago aprobado para esta venta")
+
+    passengers = session.exec(
+        select(Passenger).where(Passenger.sale_id == sale.id).order_by(Passenger.id)
+    ).all()
+    if not passengers:
+        raise SaleFlowError(400, "La venta no tiene pasajeros")
+    context = sale.provider_context or {}
+    cotizacion_guid = str(context.get("cotizacion_guid") or "").strip()
+    producto_id = _as_int_id(context.get("producto_id"))
+    if not cotizacion_guid or producto_id is None:
+        raise SaleFlowError(400, "La venta no tiene la cotización de Cardinal")
+    if not sale.emergency_first_name or not sale.emergency_last_name or not sale.emergency_phone:
+        raise SaleFlowError(400, "Falta el contacto de emergencia")
+
+    credentials = resolve_cardinal_credentials_for_agency(session, sale.agency_id)
+    drafts: list[CardinalPassengerDraft] = []
+    for row in passengers:
+        drafts.append(_cardinal_draft(row, sale))
+
+    sale.emission_status = EmissionStatus.EMITTING.value
+    sale.updated_at = datetime.utcnow()
+    session.add(sale)
+    session.flush()
+    try:
+        result = emit_cardinal_sale(
+            credentials,
+            cotizacion_guid,
+            producto_id,
+            sale.amount,
+            drafts,
+        )
+    except CardinalEmissionError as exc:
+        sale.emission_status = EmissionStatus.EMISSION_FAILED.value
+        sale.updated_at = datetime.utcnow()
+        session.add(sale)
+        _add_attempt(
+            session,
+            sale,
+            step="emit_sale",
+            success=False,
+            http_status=exc.http_status or exc.status_code,
+            request_payload=exc.request_body or {},
+            response_payload=exc.response_body or {"detail": exc.detail},
+            error_message=exc.detail,
+        )
+        _commit(session)
+        status = exc.status_code if exc.status_code < 500 else 502
+        raise SaleFlowError(status, exc.detail) from exc
+
+    saved = _save_cardinal_vouchers(session, sale, passengers, result.vouchers)
+    sale.emission_status = EmissionStatus.ISSUED.value
+    sale.payment_status = SalePaymentStatus.APPROVED.value
+    sale.updated_at = datetime.utcnow()
+    session.add(sale)
+    _add_attempt(
+        session,
+        sale,
+        step="emit_sale",
+        success=True,
+        http_status=result.status_code,
+        request_payload=result.request_body,
+        response_payload=result.response_body,
+        error_message=None,
+    )
+    _commit(session)
+    session.refresh(sale)
+    return _confirm_response(
+        sale,
+        True,
+        saved[0] if saved else None,
+        company_slug=_CARDINAL_SLUG,
+        vouchers=saved,
+    )
+
+
+def _save_cardinal_vouchers(session: Session, sale: Sale, passengers: list[Passenger], vouchers) -> list[Voucher]:
+    by_document = {row.document_number.strip().lower(): row for row in passengers}
+    saved: list[Voucher] = []
+    for index, item in enumerate(vouchers):
+        passenger = None
+        if item.document_number:
+            passenger = by_document.get(item.document_number.strip().lower())
+        if passenger is None and index < len(passengers):
+            passenger = passengers[index]
+        external_id = item.number[:80]
+        existing = session.exec(
+            select(Voucher).where(
+                Voucher.sale_id == sale.id,
+                Voucher.external_id == external_id,
+            )
+        ).first()
+        if existing is not None:
+            saved.append(existing)
+            continue
+        voucher = Voucher(
+            sale_id=sale.id or 0,
+            passenger_id=passenger.id if passenger is not None else None,
+            external_id=external_id,
+            number=item.number[:80],
+            url=(item.url or None) and item.url[:2000],
+            status=VoucherStatus.ISSUED.value,
+            provider_data={"anulado": (item.raw or {}).get("anulado")},
+        )
+        session.add(voucher)
+        session.flush()
+        saved.append(voucher)
+    return saved
+
+
+def _cardinal_draft(row: Passenger, sale: Sale) -> CardinalPassengerDraft:
+    data = row.provider_data or {}
+    type_id = _as_int_id(data.get("document_type_id"))
+    country_id = _as_int_id(data.get("country_id"))
+    if type_id is None or country_id is None:
+        raise SaleFlowError(400, "Faltan datos de Cardinal en un pasajero")
+    if not row.email or not row.phone or not row.city:
+        raise SaleFlowError(400, "A un pasajero le falta email, teléfono o localidad")
+    address = " ".join(
+        part for part in (row.street, row.street_number) if part and part.strip()
+    ).strip()
+    if not address:
+        raise SaleFlowError(400, "A un pasajero le falta el domicilio")
+    if len(row.document_number.strip()) > 20:
+        raise SaleFlowError(400, "El documento de un pasajero supera los 20 caracteres")
+    return CardinalPassengerDraft(
+        first_name=row.first_name,
+        last_name=row.last_name,
+        birth_date=row.birth_date,
+        document_type=row.document_type,
+        document_type_id=type_id,
+        document_number=row.document_number,
+        email=row.email,
+        phone=row.phone,
+        address=address,
+        city=row.city,
+        country_id=country_id,
+        emergency_first_name=sale.emergency_first_name or "",
+        emergency_last_name=sale.emergency_last_name or "",
+        emergency_phone=sale.emergency_phone or "",
+    )
+
+
+def _require_cardinal_passenger_fields(data: PassengersCreate) -> None:
+    for passenger in data.passengers:
+        missing = [
+            label
+            for label, value in (
+                ("email", passenger.email),
+                ("phone", passenger.phone),
+                ("country_id", passenger.country_id),
+                ("city", passenger.city),
+            )
+            if value is None or not str(value).strip()
+        ]
+        address = " ".join(
+            part
+            for part in (passenger.street, passenger.street_number)
+            if part and str(part).strip()
+        ).strip()
+        if not address:
+            missing.append("street")
+        if passenger.country_id and _as_int_id(passenger.country_id) is None:
+            raise SaleFlowError(400, "El país de Cardinal tiene que ser un id numérico")
+        if len(passenger.document_number.strip()) > 20:
+            raise SaleFlowError(400, "El documento de un pasajero supera los 20 caracteres")
+        if len(passenger.first_name.strip()) > 100 or len(passenger.last_name.strip()) > 100:
+            raise SaleFlowError(400, "El nombre o el apellido superan los 100 caracteres")
+        if missing:
+            raise SaleFlowError(400, "A un pasajero le falta: " + ", ".join(missing))
+
+
+def _parse_cardinal_quote_id(quote_id: str) -> tuple[str, int]:
+    parts = quote_id.strip().split("|")
+    if len(parts) != 2:
+        raise SaleFlowError(400, "El id de Cardinal tiene que incluir la cotización y el producto")
+    guid = parts[0].strip().lower()
+    producto_id = _as_int_id(parts[1])
+    if not guid or producto_id is None:
+        raise SaleFlowError(400, "El id de Cardinal tiene que incluir la cotización y el producto")
+    return guid, producto_id
+
+
+def _editable_cardinal_sale(session: Session, user: User, sale_id: int) -> Sale:
+    sale = _owned_cardinal_sale(
+        session, user, sale_id, forbidden="No podés cargar pasajeros en esta venta"
+    )
+    if sale.emission_status not in (
+        EmissionStatus.PRODUCT_SELECTED.value,
+        EmissionStatus.PASSENGERS_COMPLETE.value,
+    ):
+        raise SaleFlowError(409, "Esta venta no está lista para cargar pasajeros")
+    return sale
+
+
+def _payable_cardinal_sale(session: Session, user: User, sale_id: int) -> Sale:
+    sale = _owned_cardinal_sale(session, user, sale_id)
+    if sale.emission_status not in (
+        EmissionStatus.PASSENGERS_COMPLETE.value,
+        EmissionStatus.ISSUED.value,
+        EmissionStatus.EMISSION_FAILED.value,
+    ):
+        raise SaleFlowError(409, "Esta venta no está lista para cobrar")
+    return sale
+
+
+def _owned_cardinal_sale(
+    session: Session,
+    user: User,
+    sale_id: int,
+    *,
+    forbidden: str = "No podés cobrar esta venta",
+) -> Sale:
+    sale = session.get(Sale, sale_id)
+    if sale is None:
+        raise SaleFlowError(404, "No encontramos esa venta")
+    if sale.created_by_user_id != user.id:
+        raise SaleFlowError(403, forbidden)
+    company = session.get(Company, sale.company_id)
+    if company is None or company.slug != _CARDINAL_SLUG:
+        raise SaleFlowError(400, "Esta venta no es de Cardinal")
+    return sale
+
+
+def _as_int_id(value: object) -> int | None:
+    if isinstance(value, bool) or value is None:
+        return None
+    if isinstance(value, int):
+        return value
+    try:
+        return int(str(value).strip())
+    except ValueError:
+        return None
+
+
 def _editable_inter_assist_sale(session: Session, user: User, sale_id: int) -> Sale:
     sale = _owned_inter_assist_sale(
         session, user, sale_id, forbidden="No podés cargar pasajeros en esta venta"
@@ -1116,6 +1505,96 @@ def _owned_inter_assist_sale(
     if company is None or company.slug != _INTER_ASSIST_SLUG:
         raise SaleFlowError(400, "Esta venta no es de Inter Assist")
     return sale
+
+
+def _start_simulated_payment(
+    session: Session,
+    sale: Sale,
+    data: PaymentStart,
+) -> PaymentResponse:
+    _check_return_urls(data)
+    if sale.emission_status == EmissionStatus.ISSUED.value:
+        raise SaleFlowError(409, "Esta venta ya está emitida")
+    existing = _pending_payment(session, sale.id or 0)
+    if existing is not None and existing.checkout_url:
+        return _payment_response(sale, existing.checkout_url, created=False)
+
+    checkout_url = data.return_url_pending.strip() or data.return_url_ok.strip()
+    payment = Payment(
+        sale_id=sale.id or 0,
+        provider=PaymentProvider.SIMULATED.value,
+        status=PaymentStatus.PENDING.value,
+        amount=sale.amount,
+        currency=sale.currency,
+        checkout_url=checkout_url[:2000],
+        external_id=(data.payment_method_id or "simulated").strip()[:80],
+        financing_id=None,
+        provider_data={
+            "simulated": True,
+            "return_url_ok": data.return_url_ok.strip(),
+            "return_url_error": data.return_url_error.strip(),
+            "return_url_pending": data.return_url_pending.strip(),
+        },
+    )
+    session.add(payment)
+    sale.payment_status = SalePaymentStatus.PENDING.value
+    sale.updated_at = datetime.utcnow()
+    session.add(sale)
+    _add_attempt(
+        session,
+        sale,
+        step="process_payment",
+        success=True,
+        http_status=200,
+        request_payload={"provider": PaymentProvider.SIMULATED.value},
+        response_payload={"checkout_url": checkout_url},
+        error_message=None,
+    )
+    _commit(session)
+    session.refresh(sale)
+    return _payment_response(sale, checkout_url, created=True)
+
+
+def _simulate_sale_payment(
+    session: Session,
+    sale: Sale,
+    data: PaymentSimulate,
+) -> PaymentResponse:
+    if sale.emission_status == EmissionStatus.ISSUED.value:
+        raise SaleFlowError(409, "Esta venta ya está emitida")
+    payment = _pending_or_latest_simulated_payment(session, sale.id or 0)
+    if payment is None:
+        raise SaleFlowError(409, "No hay un pago simulado para esta venta")
+    if payment.provider != PaymentProvider.SIMULATED.value:
+        raise SaleFlowError(400, "Esta venta no usa la pasarela simulada")
+
+    if data.result == "pending":
+        payment.status = PaymentStatus.PENDING.value
+        sale.payment_status = SalePaymentStatus.PENDING.value
+    elif data.result == "approved":
+        payment.status = PaymentStatus.APPROVED.value
+        sale.payment_status = SalePaymentStatus.APPROVED.value
+    else:
+        payment.status = PaymentStatus.REJECTED.value
+        sale.payment_status = SalePaymentStatus.REJECTED.value
+
+    payment.updated_at = datetime.utcnow()
+    sale.updated_at = datetime.utcnow()
+    session.add(payment)
+    session.add(sale)
+    _add_attempt(
+        session,
+        sale,
+        step="simulate_payment",
+        success=True,
+        http_status=200,
+        request_payload={"result": data.result},
+        response_payload={"payment_status": sale.payment_status},
+        error_message=None,
+    )
+    _commit(session)
+    session.refresh(sale)
+    return _payment_response(sale, payment.checkout_url, created=False)
 
 
 def _pending_or_latest_simulated_payment(session: Session, sale_id: int) -> Payment | None:
@@ -1462,8 +1941,37 @@ def _save_voucher(session: Session, sale: Sale, confirmation) -> Voucher:
     return voucher
 
 
+def _vouchers_for(session: Session, sale_id: int) -> list[Voucher]:
+    return list(
+        session.exec(select(Voucher).where(Voucher.sale_id == sale_id).order_by(Voucher.id)).all()
+    )
+
+
 def _voucher_for(session: Session, sale_id: int) -> Voucher | None:
-    return session.exec(select(Voucher).where(Voucher.sale_id == sale_id).order_by(Voucher.id.desc())).first()
+    rows = _vouchers_for(session, sale_id)
+    return rows[-1] if rows else None
+
+
+def _issued_vouchers(
+    vouchers: list[Voucher],
+    company_slug: str,
+    sale_id: int,
+) -> list[IssuedVoucher]:
+    items: list[IssuedVoucher] = []
+    for voucher in vouchers:
+        url = (
+            _public_inter_assist_voucher_url(sale_id)
+            if company_slug == _INTER_ASSIST_SLUG
+            else voucher.url
+        )
+        items.append(
+            IssuedVoucher(
+                number=voucher.number,
+                url=url,
+                passenger_id=voucher.passenger_id,
+            )
+        )
+    return items
 
 
 def _confirm_response(
@@ -1472,20 +1980,18 @@ def _confirm_response(
     voucher: Voucher | None,
     *,
     company_slug: str | None = None,
+    vouchers: list[Voucher] | None = None,
 ) -> PaymentConfirmResponse:
-    voucher_url = None
-    if voucher is not None:
-        if company_slug == _INTER_ASSIST_SLUG:
-            voucher_url = _public_inter_assist_voucher_url(sale.id or 0)
-        else:
-            voucher_url = voucher.url
+    rows = vouchers if vouchers is not None else ([voucher] if voucher is not None else [])
+    issued = _issued_vouchers(rows, company_slug or "", sale.id or 0)
     return PaymentConfirmResponse(
         sale_id=sale.id or 0,
         emission_status=sale.emission_status,
         payment_status=sale.payment_status,
         payment_received=paid,
-        voucher_number=voucher.number if voucher else None,
-        voucher_url=voucher_url,
+        voucher_number=issued[0].number if issued else None,
+        voucher_url=issued[0].url if issued else None,
+        vouchers=issued,
     )
 
 

@@ -28,18 +28,24 @@ from app.sales.service import (
     confirm_inter_assist_payment,
     confirm_omint_payment,
     confirm_omint_payment_from_notification,
+    confirm_cardinal_payment,
     download_inter_assist_voucher_pdf,
     get_sale_for_user,
+    list_cardinal_catalog,
     list_countries,
     list_inter_assist_catalog_countries,
     list_inter_assist_catalog_provinces,
     list_provinces,
+    open_cardinal_sale,
     open_inter_assist_sale,
     open_omint_sale,
     sale_to_response,
+    set_cardinal_passengers,
     set_inter_assist_passengers,
     set_omint_passengers,
+    simulate_cardinal_payment,
     simulate_inter_assist_payment,
+    start_cardinal_payment,
     start_inter_assist_payment,
     start_omint_payment,
 )
@@ -50,6 +56,7 @@ router = APIRouter()
 
 _OMINT = "omint"
 _INTER_ASSIST = "inter_assist"
+_CARDINAL = "cardinal"
 
 
 def _company_slug(name: str) -> str:
@@ -73,7 +80,7 @@ def create_sale(
     session: Annotated[Session, Depends(get_session)],
     current_user: Annotated[User, Depends(get_current_user)],
 ) -> SaleResponse:
-    """Abre una venta. Omint asigna producto; Inter Assist congela el snapshot local."""
+    """Abre una venta. Omint asigna el producto, Cardinal congela costoFinal e Inter Assist el snapshot local."""
     slug = _company_slug(data.company)
     try:
         if slug == _OMINT:
@@ -95,6 +102,14 @@ def create_sale(
                 data.quote,
             )
             company = _INTER_ASSIST
+        elif slug == _CARDINAL:
+            sale, created = open_cardinal_sale(
+                session,
+                current_user,
+                data.company,
+                data.quote_id,
+            )
+            company = _CARDINAL
         else:
             raise SaleFlowError(
                 400,
@@ -162,6 +177,32 @@ def inter_assist_provinces(
     return CatalogResponse(items=items)
 
 
+@router.get("/cardinal/document-types", response_model=CatalogResponse)
+def cardinal_document_types(
+    session: Annotated[Session, Depends(get_session)],
+    current_user: Annotated[User, Depends(get_current_user)],
+) -> CatalogResponse:
+    """Tipos de documento de Cardinal. El pasajero sigue mandando dni, passport o cuit."""
+    try:
+        items = list_cardinal_catalog(session, current_user, "tiposDocumentos")
+    except SaleFlowError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
+    return CatalogResponse(items=items)
+
+
+@router.get("/cardinal/countries", response_model=CatalogResponse)
+def cardinal_countries(
+    session: Annotated[Session, Depends(get_session)],
+    current_user: Annotated[User, Depends(get_current_user)],
+) -> CatalogResponse:
+    """Países de residencia de Cardinal. El id numérico va en country_id de cada pasajero."""
+    try:
+        items = list_cardinal_catalog(session, current_user, "paisesResidencia")
+    except SaleFlowError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
+    return CatalogResponse(items=items)
+
+
 @router.get("/{sale_id}", response_model=SaleDetailResponse)
 def get_sale(
     sale_id: int,
@@ -218,6 +259,8 @@ def set_passengers(
             return set_omint_passengers(session, current_user, sale_id, data)
         if slug == _INTER_ASSIST:
             return set_inter_assist_passengers(session, current_user, sale_id, data)
+        if slug == _CARDINAL:
+            return set_cardinal_passengers(session, current_user, sale_id, data)
         raise SaleFlowError(400, "La emisión para esta compañía todavía no está disponible")
     except SaleFlowError as exc:
         raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
@@ -237,6 +280,8 @@ def start_payment(
             return start_omint_payment(session, current_user, sale_id, data)
         if slug == _INTER_ASSIST:
             return start_inter_assist_payment(session, current_user, sale_id, data)
+        if slug == _CARDINAL:
+            return start_cardinal_payment(session, current_user, sale_id, data)
         raise SaleFlowError(400, "La emisión para esta compañía todavía no está disponible")
     except SaleFlowError as exc:
         raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
@@ -252,9 +297,11 @@ def simulate_payment(
     """Solo Inter Assist: mueve el pago simulado a pending, approved o rejected."""
     try:
         slug = _sale_company_slug(session, sale_id)
-        if slug != _INTER_ASSIST:
-            raise SaleFlowError(400, "La simulación de pago solo aplica a Inter Assist")
-        return simulate_inter_assist_payment(session, current_user, sale_id, data)
+        if slug == _INTER_ASSIST:
+            return simulate_inter_assist_payment(session, current_user, sale_id, data)
+        if slug == _CARDINAL:
+            return simulate_cardinal_payment(session, current_user, sale_id, data)
+        raise SaleFlowError(400, "La simulación de pago solo aplica a Inter Assist y Cardinal")
     except SaleFlowError as exc:
         raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
 
@@ -272,6 +319,8 @@ def confirm_payment(
             return confirm_omint_payment(session, current_user, sale_id)
         if slug == _INTER_ASSIST:
             return confirm_inter_assist_payment(session, current_user, sale_id)
+        if slug == _CARDINAL:
+            return confirm_cardinal_payment(session, current_user, sale_id)
         raise SaleFlowError(400, "La emisión para esta compañía todavía no está disponible")
     except SaleFlowError as exc:
         raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc

@@ -107,3 +107,32 @@ Content-Type: application/json
   "parametros": "usuarios",
   "localeId": 1
 }
+
+### Emitir — un pasajero (no ejecutar en producción sin avisar)
+POST {{base_url}}/emitir
+Content-Type: application/json
+
+{
+  "agenteEmisorGuid": "{{agente_emisor_guid}}",
+  "agenteEmisorSecreto": "{{agente_emisor_secreto}}",
+  "cotizacionGuid": "PEGAR_GUID_DE_COTIZAR",
+  "productoSeleccionadoId": 0,
+  "montoCotizado": 0.00,
+  "pasajeros": [
+    {
+      "apellido": "Perez",
+      "nombre": "Ana",
+      "email": "{{email}}",
+      "tipoDocumentoId": 1,
+      "nroDocumento": "30111222",
+      "fechaNacimiento": "1991-04-22",
+      "telefono": "+5491100000000",
+      "domicilio": "Av. Ejemplo 123",
+      "localidad": "Buenos Aires",
+      "paisId": 1,
+      "emergenciaNombre": "Luis",
+      "emergenciaApellido": "Perez",
+      "emergenciaTelefono": "+5491100000001"
+    }
+  ]
+}
