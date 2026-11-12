@@ -1,3 +1,4 @@
+from datetime import date
 from typing import Annotated
 
 import json
@@ -7,7 +8,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response,
 from sqlmodel import Session
 
 from app.core.database import get_session
-from app.core.security import get_current_user
+from app.core.security import get_current_admin_user, get_current_user
 from app.models import User
 from app.models.company import Company
 from app.models.sale import Sale
@@ -21,6 +22,7 @@ from app.sales.schemas import (
     PaymentStart,
     SaleCreate,
     SaleDetailResponse,
+    SaleListResponse,
     SaleResponse,
 )
 from app.sales.service import (
@@ -31,6 +33,7 @@ from app.sales.service import (
     download_inter_assist_voucher_pdf,
     get_sale_for_user,
     list_countries,
+    list_sales,
     list_inter_assist_catalog_countries,
     list_inter_assist_catalog_provinces,
     list_provinces,
@@ -104,6 +107,37 @@ def create_sale(
         raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
     response.status_code = status.HTTP_201_CREATED if created else status.HTTP_200_OK
     return sale_to_response(sale, company)
+
+
+@router.get("", response_model=SaleListResponse)
+def list_sales_route(
+    session: Annotated[Session, Depends(get_session)],
+    current_user: Annotated[User, Depends(get_current_admin_user)],
+    emission_status: str | None = Query(default=None),
+    payment_status: str | None = Query(default=None),
+    company: str | None = Query(default=None, description="Slug de la compañía"),
+    agency_id: int | None = Query(default=None),
+    created_from: date | None = Query(default=None),
+    created_to: date | None = Query(default=None),
+    limit: Annotated[int, Query(ge=1, le=100)] = 50,
+    offset: Annotated[int, Query(ge=0)] = 0,
+) -> SaleListResponse:
+    """Todas las ventas. Solo admin. Sin pasajeros: el detalle es GET /v1/sales/{id}."""
+    _ = current_user
+    try:
+        return list_sales(
+            session,
+            emission_status=emission_status,
+            payment_status=payment_status,
+            company=company,
+            agency_id=agency_id,
+            created_from=created_from,
+            created_to=created_to,
+            limit=limit,
+            offset=offset,
+        )
+    except SaleFlowError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
 
 
 @router.get("/omint/countries", response_model=CatalogResponse)

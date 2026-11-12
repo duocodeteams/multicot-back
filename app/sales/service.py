@@ -5,9 +5,10 @@ from __future__ import annotations
 import hashlib
 import logging
 from collections import Counter
-from datetime import date, datetime
+from datetime import date, datetime, time, timedelta
 from decimal import Decimal
 
+from sqlalchemy import func
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm.attributes import flag_modified
 from sqlmodel import Session, select
@@ -44,6 +45,7 @@ from app.sales.schemas import (
     PaymentSimulate,
     PaymentStart,
     SaleDetailResponse,
+    SaleListResponse,
     SaleResponse,
 )
 from app.services.companies.inter_assist import InterAssistQuoteProvider
@@ -740,11 +742,66 @@ def get_inter_assist_sale(session: Session, user: User, sale_id: int) -> SaleDet
     return sale_detail(session, sale, _INTER_ASSIST_SLUG)
 
 
+def list_sales(
+    session: Session,
+    *,
+    emission_status: str | None = None,
+    payment_status: str | None = None,
+    company: str | None = None,
+    agency_id: int | None = None,
+    created_from: date | None = None,
+    created_to: date | None = None,
+    limit: int = 50,
+    offset: int = 0,
+) -> SaleListResponse:
+    """Todas las ventas, de cualquier usuario. El llamador tiene que ser admin."""
+    allowed_emission = {item.value for item in EmissionStatus}
+    if emission_status is not None and emission_status not in allowed_emission:
+        raise SaleFlowError(400, "emission_status no es válido")
+    if payment_status is not None and payment_status not in {item.value for item in SalePaymentStatus}:
+        raise SaleFlowError(400, "payment_status no es válido")
+    if created_from is not None and created_to is not None and created_from > created_to:
+        raise SaleFlowError(400, "created_from no puede ser posterior a created_to")
+
+    conditions = []
+    if emission_status is not None:
+        conditions.append(Sale.emission_status == emission_status)
+    if payment_status is not None:
+        conditions.append(Sale.payment_status == payment_status)
+    if agency_id is not None:
+        conditions.append(Sale.agency_id == agency_id)
+    if created_from is not None:
+        conditions.append(Sale.created_at >= datetime.combine(created_from, time.min))
+    if created_to is not None:
+        conditions.append(
+            Sale.created_at < datetime.combine(created_to + timedelta(days=1), time.min)
+        )
+    if company is not None:
+        conditions.append(Company.slug == company.strip().lower().replace(" ", "_"))
+
+    stmt = select(Sale, Company.slug).join(Company, Company.id == Sale.company_id)
+    count_stmt = select(func.count()).select_from(Sale).join(Company, Company.id == Sale.company_id)
+    for condition in conditions:
+        stmt = stmt.where(condition)
+        count_stmt = count_stmt.where(condition)
+    stmt = stmt.order_by(Sale.created_at.desc(), Sale.id.desc()).offset(offset).limit(limit)
+
+    count_result = session.exec(count_stmt).one()
+    total = count_result[0] if isinstance(count_result, tuple) else count_result
+    rows = session.exec(stmt).all()
+    return SaleListResponse(
+        items=[sale_to_response(sale, slug) for sale, slug in rows],
+        total=int(total),
+        limit=limit,
+        offset=offset,
+    )
+
+
 def get_sale_for_user(session: Session, user: User, sale_id: int) -> SaleDetailResponse:
     sale = session.get(Sale, sale_id)
     if sale is None:
         raise SaleFlowError(404, "No encontramos esa venta")
-    if sale.created_by_user_id != user.id:
+    if sale.created_by_user_id != user.id and user.role != UserRole.ADMIN:
         raise SaleFlowError(403, "No podés ver esta venta")
     company = session.get(Company, sale.company_id)
     if company is None:
@@ -807,7 +864,11 @@ def download_inter_assist_voucher_pdf(
 ) -> tuple[bytes, str]:
     """Proxy del PDF: el front no puede abrir la URL de Inter Assist (pide API Key)."""
     sale = _owned_inter_assist_sale(
-        session, user, sale_id, forbidden="No podés ver el voucher de esta venta"
+        session,
+        user,
+        sale_id,
+        forbidden="No podés ver el voucher de esta venta",
+        allow_admin=True,
     )
     if sale.emission_status != EmissionStatus.ISSUED.value:
         raise SaleFlowError(409, "Esta venta todavía no tiene voucher emitido")
@@ -1107,11 +1168,14 @@ def _owned_inter_assist_sale(
     sale_id: int,
     *,
     forbidden: str = "No podés cobrar esta venta",
+    allow_admin: bool = False,
 ) -> Sale:
     sale = session.get(Sale, sale_id)
     if sale is None:
         raise SaleFlowError(404, "No encontramos esa venta")
-    if sale.created_by_user_id != user.id:
+    owner = sale.created_by_user_id == user.id
+    admin_reader = allow_admin and user.role == UserRole.ADMIN
+    if not owner and not admin_reader:
         raise SaleFlowError(403, forbidden)
     company = session.get(Company, sale.company_id)
     if company is None or company.slug != _INTER_ASSIST_SLUG:
