@@ -64,7 +64,7 @@ Inter Assist identifica viajeros por DNI (`document_number`). El contacto de eme
 La respuesta de pasajeros incluye un medio de pago simulado:
 
 ```json
-{ "id": "simulated", "code": "SIMULATED", "requires_financing": false, "financing": [] }
+{ "id": "simulated", "code": "SIMULATED", "name": "SIMULATED", "requires_financing": false, "financing": [] }
 ```
 
 ## Pago simulado

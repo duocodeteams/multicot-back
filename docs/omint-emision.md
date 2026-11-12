@@ -63,6 +63,7 @@ La respuesta incluye `payment_methods`:
 
 - `id`: se manda al abrir el pago.
 - `code`
+- `name`: texto para el desplegable (Visa, Mastercard, American Express, Visa Débito, Tarjeta Naranja, Mercado Pago). Si el código no está mapeado, `name` repite `code`.
 - `requires_financing`: si es true, hay que mandar `financing_id`. En el acuerdo 3308 es true para Visa (`TVI`), Mastercard (`TMA`), American Express (`TAM`), Visa Débito (`TVD`) y Tarjeta Naranja (`TNA`). Mercado Pago (`MP`) no pide cuotas.
 - `financing`: `{ "id", "dues" }`. Esos id cambian en cada cotización.
 

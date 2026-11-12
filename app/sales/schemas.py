@@ -168,6 +168,7 @@ class PaymentMethodOption(BaseModel):
 
     id: str
     code: str
+    name: str
     requires_financing: bool
     financing: list[FinancingOption]
 

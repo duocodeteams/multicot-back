@@ -460,6 +460,7 @@ class SetPassengersTest(TestCase):
         self.assertEqual(len(response.payment_methods), 1)
         method = response.payment_methods[0]
         self.assertEqual(method.code, "TVI")
+        self.assertEqual(method.name, "Visa")
         self.assertTrue(method.requires_financing)
         self.assertEqual(method.financing[0].dues, 1)
         self.assertNotIn("extra", method.model_dump())

@@ -33,6 +33,16 @@ _TRIP_BY_PRODUCT_TYPE = {code: trip_type for trip_type, code in _PRODUCT_TYPE_MA
 # MP (Mercado Pago) no está: no tiene cuotas. Los id salen en cada cotización.
 FINANCING_REQUIRED_CODES = frozenset({"TVI", "TMA", "TAM", "TVD", "TNA"})
 
+# Texto para el desplegable. Un código que no esté acá se muestra tal cual.
+PAYMENT_METHOD_NAMES = {
+    "TVI": "Visa",
+    "TMA": "Mastercard",
+    "TAM": "American Express",
+    "TVD": "Visa Débito",
+    "TNA": "Tarjeta Naranja",
+    "MP": "Mercado Pago",
+}
+
 # urlNotificacion solo llega con Mercado Pago. El POST trae IdStatus
 # (1 iniciada, 2 aprobada, 3 rechazada, 4 pendiente), Descripcion y Message.
 # No hay header ni firma, y el body no trae la cotización: el id va en nuestra URL.
