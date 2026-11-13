@@ -71,6 +71,15 @@ class SaleResponse(BaseModel):
     created_at: datetime
 
 
+class SaleListResponse(BaseModel):
+    """Listado de admin. El detalle sigue en GET /v1/sales/{id}."""
+
+    items: list[SaleResponse]
+    total: int
+    limit: int
+    offset: int
+
+
 class EmergencyContactInput(BaseModel):
     first_name: str = Field(min_length=1, max_length=120)
     last_name: str = Field(min_length=1, max_length=120)
