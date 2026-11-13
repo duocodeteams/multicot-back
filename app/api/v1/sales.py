@@ -27,6 +27,7 @@ from app.sales.schemas import (
 )
 from app.sales.service import (
     SaleFlowError,
+    cancel_sale,
     confirm_inter_assist_payment,
     confirm_omint_payment,
     confirm_omint_payment_from_notification,
@@ -194,6 +195,19 @@ def inter_assist_provinces(
     except SaleFlowError as exc:
         raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
     return CatalogResponse(items=items)
+
+
+@router.post("/{sale_id}/cancel", response_model=SaleDetailResponse)
+def cancel_sale_route(
+    sale_id: int,
+    session: Annotated[Session, Depends(get_session)],
+    current_user: Annotated[User, Depends(get_current_user)],
+) -> SaleDetailResponse:
+    """Cancela la venta si el pago no está pendiente ni aprobado. La cotización queda tomada."""
+    try:
+        return cancel_sale(session, current_user, sale_id)
+    except SaleFlowError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
 
 
 @router.get("/{sale_id}", response_model=SaleDetailResponse)
