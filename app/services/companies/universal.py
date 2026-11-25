@@ -6,7 +6,7 @@ TipoCambio, MonedaLista, MonedaLocal.
 
 import logging
 import re
-from datetime import timedelta
+from datetime import date, timedelta
 from decimal import Decimal, InvalidOperation
 from xml.etree import ElementTree as ET
 
@@ -22,6 +22,18 @@ from app.quotations.schemas import Benefit, PlanException, QuotePlan, QuoteReque
 logger = logging.getLogger(__name__)
 
 _SOAP_NS = "http://schemas.xmlsoap.org/soap/envelope/"
+
+
+def universal_coverage_end(trip_type: str, departure: date, return_date: date | None) -> date:
+    """Multiviaje cotiza un año corrido. El resto usa la fecha de regreso."""
+    if trip_type == "multiviaje":
+        try:
+            anniversary = departure.replace(year=departure.year + 1)
+        except ValueError:
+            # 29 de febrero: el aniversario cae el 1 de marzo y el fin queda el 28.
+            anniversary = date(departure.year + 1, 3, 1)
+        return anniversary - timedelta(days=1)
+    return return_date or departure
 _SOAP_ACTION = "document/http://siebel.com/CustomUI:LeadCotizadorOper"
 
 
@@ -34,12 +46,17 @@ class UniversalQuoteProvider:
         self._destinos = get_universal_destinos(self._settings)
         self._trip_types = get_universal_trip_types(self._settings)
 
-    def get_quotes(self, request: QuoteRequest) -> list[QuotePlan]:
+    def get_quotes(
+        self,
+        request: QuoteRequest,
+        organization_id: str | None = None,
+    ) -> list[QuotePlan]:
         settings = self._settings
         if not settings.universal_username or not settings.universal_password:
             logger.debug("Universal: faltan UNIVERSAL_USERNAME/UNIVERSAL_PASSWORD")
             return []
-        if not settings.universal_organizacion_emisora:
+        organization = (organization_id or settings.universal_organizacion_emisora).strip()
+        if not organization:
             logger.debug("Universal: falta UNIVERSAL_ORGANIZACION_EMISORA")
             return []
 
@@ -70,7 +87,7 @@ class UniversalQuoteProvider:
             logger.debug("Universal: más de 10 pasajeros no soportado por el WS")
             return []
 
-        soap_envelope = self._build_envelope(request, destino, tipo_viaje)
+        soap_envelope = self._build_envelope(request, destino, tipo_viaje, organization)
         headers = {
             "Content-Type": "text/xml;charset=UTF-8",
             "Accept": "text/xml",
@@ -90,23 +107,24 @@ class UniversalQuoteProvider:
             response.raise_for_status()
             return self._parse_response(response.text)
 
-    def _build_envelope(self, request: QuoteRequest, destino: str, tipo_viaje: str) -> str:
+    def _build_envelope(
+        self,
+        request: QuoteRequest,
+        destino: str,
+        tipo_viaje: str,
+        organization: str,
+    ) -> str:
         settings = self._settings
         edades = request.ages[:10] + [None] * (10 - len(request.ages))
         cant_cotizaciones = "0"
         convenio = settings.universal_convenio
         folleto = settings.universal_folleto
         fecha_inicio = request.departure_date
-        fecha_fin = request.return_date
-
-        # Universal: para multiviaje (anual) se envían fechas equivalentes a un año.
-        # Ejemplo: 04/25/2026 -> 04/24/2027
-        if request.trip_type == "multiviaje":
-            try:
-                fecha_fin = fecha_inicio.replace(year=fecha_inicio.year + 1) - timedelta(days=1)
-            except ValueError:
-                # Manejo Feb 29: si no existe en el año siguiente, usar Feb 28.
-                fecha_fin = fecha_inicio.replace(year=fecha_inicio.year + 1, day=28) - timedelta(days=1)
+        fecha_fin = universal_coverage_end(
+            request.trip_type,
+            fecha_inicio,
+            request.return_date,
+        )
 
         def age_tag(i: int, age: int | None) -> str:
             val = "" if age is None else str(age)
@@ -130,7 +148,7 @@ class UniversalQuoteProvider:
             "<ual:UALeadCotizadorReq>"
             "<ual:DatosLeadCotizadorIn>"
             "<ual:IdLead></ual:IdLead>"
-            f"<ual:OrganizacionEmisora>{settings.universal_organizacion_emisora}</ual:OrganizacionEmisora>"
+            f"<ual:OrganizacionEmisora>{organization}</ual:OrganizacionEmisora>"
             f"<ual:CantCotizaciones>{cant_cotizaciones}</ual:CantCotizaciones>"
             f"<ual:Convenio>{convenio}</ual:Convenio>"
             f"<ual:Folleto>{folleto}</ual:Folleto>"
