@@ -744,17 +744,19 @@ def get_inter_assist_sale(session: Session, user: User, sale_id: int) -> SaleDet
 
 def list_sales(
     session: Session,
+    user: User,
     *,
     emission_status: str | None = None,
     payment_status: str | None = None,
     company: str | None = None,
     agency_id: int | None = None,
+    created_by_user_id: int | None = None,
     created_from: date | None = None,
     created_to: date | None = None,
     limit: int = 50,
     offset: int = 0,
 ) -> SaleListResponse:
-    """Todas las ventas, de cualquier usuario. El llamador tiene que ser admin."""
+    """Ventas del usuario. El admin ve todas y puede pedir las de otra persona."""
     allowed_emission = {item.value for item in EmissionStatus}
     if emission_status is not None and emission_status not in allowed_emission:
         raise SaleFlowError(400, "emission_status no es válido")
@@ -763,7 +765,15 @@ def list_sales(
     if created_from is not None and created_to is not None and created_from > created_to:
         raise SaleFlowError(400, "created_from no puede ser posterior a created_to")
 
+    owner_id = created_by_user_id
+    if user.role != UserRole.ADMIN:
+        if created_by_user_id is not None and created_by_user_id != user.id:
+            raise SaleFlowError(403, "No podés ver las ventas de otro usuario")
+        owner_id = user.id
+
     conditions = []
+    if owner_id is not None:
+        conditions.append(Sale.created_by_user_id == owner_id)
     if emission_status is not None:
         conditions.append(Sale.emission_status == emission_status)
     if payment_status is not None:
@@ -797,12 +807,33 @@ def list_sales(
     )
 
 
-def get_sale_for_user(session: Session, user: User, sale_id: int) -> SaleDetailResponse:
+_CANCELLABLE_PAYMENTS = {
+    SalePaymentStatus.NOT_STARTED.value,
+    SalePaymentStatus.REJECTED.value,
+}
+
+
+def cancel_sale(session: Session, user: User, sale_id: int) -> SaleDetailResponse:
+    """Deja la venta en cancelled. La cotización sigue tomada."""
     sale = session.get(Sale, sale_id)
     if sale is None:
         raise SaleFlowError(404, "No encontramos esa venta")
     if sale.created_by_user_id != user.id and user.role != UserRole.ADMIN:
-        raise SaleFlowError(403, "No podés ver esta venta")
+        raise SaleFlowError(403, "No podés cancelar esta venta")
+    if sale.emission_status != EmissionStatus.CANCELLED.value:
+        if sale.payment_status not in _CANCELLABLE_PAYMENTS:
+            raise SaleFlowError(
+                409,
+                "No se puede cancelar una venta con el pago pendiente o aprobado",
+            )
+        sale.emission_status = EmissionStatus.CANCELLED.value
+        session.add(sale)
+        _commit(session)
+        session.refresh(sale)
+    return _sale_detail_for_company(session, sale)
+
+
+def _sale_detail_for_company(session: Session, sale: Sale) -> SaleDetailResponse:
     company = session.get(Company, sale.company_id)
     if company is None:
         raise SaleFlowError(400, "La compañía de la venta no existe")
@@ -811,6 +842,15 @@ def get_sale_for_user(session: Session, user: User, sale_id: int) -> SaleDetailR
     if company.slug == _INTER_ASSIST_SLUG:
         return sale_detail(session, sale, _INTER_ASSIST_SLUG)
     raise SaleFlowError(400, "La emisión para esta compañía todavía no está disponible")
+
+
+def get_sale_for_user(session: Session, user: User, sale_id: int) -> SaleDetailResponse:
+    sale = session.get(Sale, sale_id)
+    if sale is None:
+        raise SaleFlowError(404, "No encontramos esa venta")
+    if sale.created_by_user_id != user.id and user.role != UserRole.ADMIN:
+        raise SaleFlowError(403, "No podés ver esta venta")
+    return _sale_detail_for_company(session, sale)
 
 
 def passengers_response(session: Session, sale: Sale) -> PassengersResponse:
