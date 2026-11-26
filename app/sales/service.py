@@ -14,6 +14,7 @@ from sqlalchemy.orm.attributes import flag_modified
 from sqlmodel import Session, select
 
 from app.core.config import get_settings
+from app.credentials.service import resolve_universal_organization
 from app.models.company import Company
 from app.models.plan import Plan
 from app.models.sale import (
@@ -47,11 +48,20 @@ from app.sales.schemas import (
     SaleDetailResponse,
     SaleListResponse,
     SaleResponse,
+    UniversalQuoteSnapshot,
 )
 from app.services.companies.inter_assist import InterAssistQuoteProvider
 from app.services.companies.inter_assist_catalog import (
     list_inter_assist_countries,
     list_inter_assist_provinces,
+)
+from app.services.companies.universal_emission import (
+    UniversalEmissionError,
+    UniversalPassengerDraft,
+    emit_universal_voucher,
+    fetch_universal_voucher_pdf,
+    retire_universal_lead,
+    universal_charge,
 )
 from app.services.companies.inter_assist_emission import (
     InterAssistClientDraft,
@@ -82,6 +92,7 @@ logger = logging.getLogger(__name__)
 
 _OMINT_SLUG = "omint"
 _INTER_ASSIST_SLUG = "inter_assist"
+_UNIVERSAL_SLUG = "universal"
 _SIMULATED_PAYMENT_METHOD = {
     "id": "simulated",
     "code": "SIMULATED",
@@ -735,6 +746,452 @@ def confirm_inter_assist_payment(
     return _confirm_inter_assist_sale(session, sale)
 
 
+def open_universal_sale(
+    session: Session,
+    user: User,
+    company_name: str,
+    quote_id: str,
+    quote: UniversalQuoteSnapshot,
+) -> tuple[Sale, bool]:
+    """Congela el lead de Universal. El voucher se pide después del pago simulado."""
+    if _normalize_company(company_name) != _UNIVERSAL_SLUG:
+        raise SaleFlowError(400, "La emisión para esta compañía todavía no está disponible")
+    if quote.origin.strip().upper() != "AR":
+        raise SaleFlowError(400, "Universal solo se emite con origen Argentina")
+    lead_id = quote_id.strip()
+    if not lead_id or "/" in lead_id:
+        raise SaleFlowError(400, "El lead de Universal no es válido")
+    company = session.exec(select(Company).where(Company.slug == _UNIVERSAL_SLUG)).first()
+    if company is None or company.id is None:
+        raise SaleFlowError(400, "Universal no está cargada como compañía")
+    if not company.active:
+        raise SaleFlowError(400, "Universal no está activa")
+    if quote.trip_type != "multiviaje" and quote.return_date is None:
+        raise SaleFlowError(400, "Falta la fecha de regreso")
+    try:
+        currency, amount, destination = universal_charge(
+            quote.destination_id,
+            quote.amount_usd,
+            quote.amount_local,
+        )
+    except UniversalEmissionError as exc:
+        raise SaleFlowError(exc.status_code, exc.detail) from exc
+
+    organization_id = resolve_universal_organization(session, user)
+    if not organization_id:
+        raise SaleFlowError(400, "Falta la organización de Universal")
+    reference = f"universal:{lead_id}"
+    existing = session.exec(select(Sale).where(Sale.provider_reference == reference)).first()
+    if existing is not None:
+        if existing.created_by_user_id != user.id:
+            raise SaleFlowError(409, "Esa cotización ya tiene una venta")
+        if existing.emission_status in _LOCKED_STATUSES:
+            return existing, False
+        if existing.emission_status == EmissionStatus.PRODUCT_SELECTED.value:
+            return existing, False
+
+    product_id = (quote.product_id or lead_id).strip()
+    context = {
+        "lead_id": lead_id,
+        "organization_id": organization_id,
+        "destination": destination,
+        "list_currency": currency,
+        "amount_usd": str(quote.amount_usd),
+        "amount_local": str(quote.amount_local) if quote.amount_local is not None else None,
+    }
+    local_plan_id = _local_plan_id(session, company.id, product_id)
+    if existing is None:
+        seller_id, agency_id = _attribution(session, user)
+        sale = Sale(
+            created_by_user_id=user.id or 0,
+            agency_id=agency_id,
+            seller_id=seller_id,
+            company_id=company.id,
+            emission_status=EmissionStatus.PRODUCT_SELECTED.value,
+            payment_status=SalePaymentStatus.NOT_STARTED.value,
+            provider_reference=reference,
+            origin="AR",
+            destination_id=quote.destination_id,
+            trip_type=quote.trip_type,
+            days_range=quote.days_range,
+            departure_date=quote.departure_date,
+            return_date=quote.return_date,
+            quoted_ages=list(quote.ages),
+            external_plan_id=product_id[:80],
+            plan_name=quote.plan_name[:200],
+            plan_id=local_plan_id,
+            currency=currency,
+            amount=amount,
+            markup=quote.markup,
+            provider_context=context,
+        )
+        session.add(sale)
+        created = True
+    else:
+        existing.emission_status = EmissionStatus.PRODUCT_SELECTED.value
+        existing.destination_id = quote.destination_id
+        existing.trip_type = quote.trip_type
+        existing.days_range = quote.days_range
+        existing.departure_date = quote.departure_date
+        existing.return_date = quote.return_date
+        existing.quoted_ages = list(quote.ages)
+        existing.external_plan_id = product_id[:80]
+        existing.plan_name = quote.plan_name[:200]
+        existing.plan_id = local_plan_id
+        existing.currency = currency
+        existing.amount = amount
+        existing.markup = quote.markup
+        existing.provider_context = context
+        existing.updated_at = datetime.utcnow()
+        session.add(existing)
+        sale = existing
+        created = False
+
+    session.flush()
+    _add_attempt(
+        session,
+        sale,
+        success=True,
+        http_status=200,
+        request_payload={"lead_id": lead_id, "destination": destination, "currency": currency},
+        response_payload={"provider_reference": reference},
+        error_message=None,
+        step="select_product",
+    )
+    try:
+        session.commit()
+    except IntegrityError as exc:
+        session.rollback()
+        raced = session.exec(select(Sale).where(Sale.provider_reference == reference)).first()
+        if raced is None or raced.created_by_user_id != user.id:
+            raise SaleFlowError(409, "Esa cotización ya tiene una venta") from exc
+        return raced, False
+    session.refresh(sale)
+    return sale, created
+
+
+def set_universal_passengers(
+    session: Session,
+    user: User,
+    sale_id: int,
+    data: PassengersCreate,
+) -> PassengersResponse:
+    """Guarda los pasajeros en local. Universal los recibe al emitir."""
+    sale = _editable_universal_sale(session, user, sale_id)
+    if sale.departure_date is None:
+        raise SaleFlowError(400, "La venta no tiene fecha de salida")
+    quoted_ages = [int(age) for age in (sale.quoted_ages or [])]
+    if len(data.passengers) != len(quoted_ages):
+        raise SaleFlowError(400, "La cantidad de pasajeros tiene que coincidir con la cotización")
+    ages = [_age_on(passenger.birth_date, sale.departure_date) for passenger in data.passengers]
+    if Counter(ages) != Counter(quoted_ages):
+        raise SaleFlowError(400, "Las edades a la fecha de salida no coinciden con la cotización")
+
+    _replace_passengers_generic(session, sale, data)
+    sale.emergency_first_name = data.emergency_contact.first_name.strip()
+    sale.emergency_last_name = data.emergency_contact.last_name.strip()
+    sale.emergency_phone = data.emergency_contact.phone.strip()
+    sale.emergency_email = (
+        str(data.emergency_contact.email) if data.emergency_contact.email else None
+    )
+    sale.emission_status = EmissionStatus.PASSENGERS_COMPLETE.value
+    sale.updated_at = datetime.utcnow()
+    context = dict(sale.provider_context or {})
+    context["payment_methods"] = [_SIMULATED_PAYMENT_METHOD]
+    sale.provider_context = context
+    flag_modified(sale, "provider_context")
+    session.add(sale)
+    _add_attempt(
+        session,
+        sale,
+        step="assign_passengers",
+        success=True,
+        http_status=200,
+        request_payload={"passengers": len(data.passengers)},
+        response_payload={"payment_methods": [_SIMULATED_PAYMENT_METHOD]},
+        error_message=None,
+    )
+    _commit(session)
+    session.refresh(sale)
+    return passengers_response(session, sale)
+
+
+def start_universal_payment(
+    session: Session,
+    user: User,
+    sale_id: int,
+    data: PaymentStart,
+) -> PaymentResponse:
+    """Abre un cobro simulado. Universal no cobra."""
+    sale = _payable_universal_sale(session, user, sale_id)
+    _check_return_urls(data)
+    if sale.emission_status == EmissionStatus.ISSUED.value:
+        raise SaleFlowError(409, "Esta venta ya está emitida")
+    existing = _pending_payment(session, sale.id or 0)
+    if existing is not None and existing.checkout_url:
+        return _payment_response(sale, existing.checkout_url, created=False)
+
+    checkout_url = data.return_url_pending.strip() or data.return_url_ok.strip()
+    payment = Payment(
+        sale_id=sale.id or 0,
+        provider=PaymentProvider.SIMULATED.value,
+        status=PaymentStatus.PENDING.value,
+        amount=sale.amount,
+        currency=sale.currency,
+        checkout_url=checkout_url[:2000],
+        external_id="simulated",
+        financing_id=None,
+        provider_data={"simulated": True},
+    )
+    session.add(payment)
+    sale.payment_status = SalePaymentStatus.PENDING.value
+    sale.updated_at = datetime.utcnow()
+    session.add(sale)
+    _add_attempt(
+        session,
+        sale,
+        step="process_payment",
+        success=True,
+        http_status=200,
+        request_payload={"provider": PaymentProvider.SIMULATED.value},
+        response_payload={"checkout_url": checkout_url},
+        error_message=None,
+    )
+    _commit(session)
+    session.refresh(sale)
+    return _payment_response(sale, checkout_url, created=True)
+
+
+def simulate_universal_payment(
+    session: Session,
+    user: User,
+    sale_id: int,
+    data: PaymentSimulate,
+) -> PaymentResponse:
+    sale = _owned_universal_sale(session, user, sale_id)
+    if sale.emission_status == EmissionStatus.ISSUED.value:
+        raise SaleFlowError(409, "Esta venta ya está emitida")
+    payment = _pending_or_latest_simulated_payment(session, sale.id or 0)
+    if payment is None:
+        raise SaleFlowError(409, "No hay un pago simulado para esta venta")
+    if data.result == "pending":
+        payment.status = PaymentStatus.PENDING.value
+        sale.payment_status = SalePaymentStatus.PENDING.value
+    elif data.result == "approved":
+        payment.status = PaymentStatus.APPROVED.value
+        sale.payment_status = SalePaymentStatus.APPROVED.value
+    else:
+        payment.status = PaymentStatus.REJECTED.value
+        sale.payment_status = SalePaymentStatus.REJECTED.value
+    payment.updated_at = datetime.utcnow()
+    sale.updated_at = datetime.utcnow()
+    session.add(payment)
+    session.add(sale)
+    _add_attempt(
+        session,
+        sale,
+        step="simulate_payment",
+        success=True,
+        http_status=200,
+        request_payload={"result": data.result},
+        response_payload={"payment_status": sale.payment_status},
+        error_message=None,
+    )
+    _commit(session)
+    session.refresh(sale)
+    return _payment_response(sale, payment.checkout_url, created=False)
+
+
+def confirm_universal_payment(
+    session: Session,
+    user: User,
+    sale_id: int,
+) -> PaymentConfirmResponse:
+    sale = _owned_universal_sale(session, user, sale_id)
+    return _confirm_universal_sale(session, sale)
+
+
+def _confirm_universal_sale(session: Session, sale: Sale) -> PaymentConfirmResponse:
+    if sale.emission_status == EmissionStatus.ISSUED.value:
+        return _confirm_response(
+            sale, True, _voucher_for(session, sale.id or 0), company_slug=_UNIVERSAL_SLUG
+        )
+    if sale.payment_status == SalePaymentStatus.REJECTED.value:
+        raise SaleFlowError(409, "El pago de esta venta fue rechazado")
+    if sale.payment_status == SalePaymentStatus.PENDING.value:
+        return _confirm_response(sale, False, None, company_slug=_UNIVERSAL_SLUG)
+    if sale.payment_status != SalePaymentStatus.APPROVED.value:
+        raise SaleFlowError(409, "El pago de esta venta no está iniciado")
+    if _approved_simulated_payment(session, sale.id or 0) is None:
+        raise SaleFlowError(409, "No hay un pago aprobado para esta venta")
+    if sale.departure_date is None or not sale.trip_type:
+        raise SaleFlowError(400, "La venta no tiene datos de viaje")
+
+    passengers = session.exec(
+        select(Passenger).where(Passenger.sale_id == sale.id).order_by(Passenger.id)
+    ).all()
+    if not passengers:
+        raise SaleFlowError(400, "La venta no tiene pasajeros")
+    context = dict(sale.provider_context or {})
+    lead_id = str(context.get("lead_id") or "").strip()
+    organization_id = str(context.get("organization_id") or "").strip()
+    destination = str(context.get("destination") or "").strip()
+    if not lead_id or not organization_id or not destination:
+        raise SaleFlowError(400, "La venta no tiene el lead de Universal")
+
+    sale.emission_status = EmissionStatus.EMITTING.value
+    sale.updated_at = datetime.utcnow()
+    session.add(sale)
+    session.flush()
+    try:
+        result = emit_universal_voucher(
+            lead_id=lead_id,
+            control_number=f"DYS-UA-{sale.id}",
+            organization_id=organization_id,
+            plan_name=sale.plan_name,
+            destination=destination,
+            currency=sale.currency,
+            amount=sale.amount,
+            departure_date=sale.departure_date,
+            return_date=sale.return_date or sale.departure_date,
+            trip_type=sale.trip_type,
+            passengers=[
+                UniversalPassengerDraft(
+                    first_name=row.first_name,
+                    last_name=row.last_name,
+                    birth_date=row.birth_date,
+                    document_type=row.document_type,
+                    document_number=row.document_number,
+                    email=row.email,
+                )
+                for row in passengers
+            ],
+        )
+    except UniversalEmissionError as exc:
+        sale.emission_status = EmissionStatus.EMISSION_FAILED.value
+        sale.updated_at = datetime.utcnow()
+        session.add(sale)
+        _add_attempt(
+            session,
+            sale,
+            step="emit_sale",
+            success=False,
+            http_status=exc.http_status or exc.status_code,
+            request_payload=exc.request_body or {},
+            response_payload=exc.response_body or {"detail": exc.detail},
+            error_message=exc.detail,
+        )
+        _commit(session)
+        status = exc.status_code if exc.status_code < 500 else 502
+        raise SaleFlowError(status, exc.detail) from exc
+
+    try:
+        retire_universal_lead(lead_id)
+    except UniversalEmissionError:
+        logger.warning("universal baja lead failed sale_id=%s lead=%s", sale.id, lead_id)
+
+    sale.emission_status = EmissionStatus.ISSUED.value
+    sale.payment_status = SalePaymentStatus.APPROVED.value
+    sale.updated_at = datetime.utcnow()
+    session.add(sale)
+    voucher = Voucher(
+        sale_id=sale.id or 0,
+        passenger_id=None,
+        external_id=result.number[:80],
+        number=result.number[:80],
+        url=_public_voucher_pdf_url(sale.id or 0)[:2000],
+        status=VoucherStatus.ISSUED.value,
+        provider_data={"organization_id": organization_id},
+    )
+    session.add(voucher)
+    _add_attempt(
+        session,
+        sale,
+        step="emit_sale",
+        success=True,
+        http_status=result.status_code,
+        request_payload=result.request_body,
+        response_payload={"voucher_number": result.number},
+        error_message=None,
+    )
+    _commit(session)
+    session.refresh(sale)
+    return _confirm_response(sale, True, voucher, company_slug=_UNIVERSAL_SLUG)
+
+
+def download_universal_voucher_pdf(
+    session: Session,
+    user: User,
+    sale_id: int,
+    lang: str = "es",
+) -> tuple[bytes, str]:
+    sale = _owned_universal_sale(
+        session,
+        user,
+        sale_id,
+        forbidden="No podés ver el voucher de esta venta",
+        allow_admin=True,
+    )
+    if sale.emission_status != EmissionStatus.ISSUED.value:
+        raise SaleFlowError(409, "Esta venta todavía no tiene voucher emitido")
+    voucher = _voucher_for(session, sale.id or 0)
+    if voucher is None or not (voucher.number or "").strip():
+        raise SaleFlowError(404, "No encontramos el voucher de esta venta")
+    organization_id = str((voucher.provider_data or {}).get("organization_id") or "").strip()
+    if not organization_id:
+        organization_id = str((sale.provider_context or {}).get("organization_id") or "").strip()
+    try:
+        content = fetch_universal_voucher_pdf(voucher.number or "", organization_id, lang=lang)
+    except UniversalEmissionError as exc:
+        status = exc.status_code if exc.status_code < 500 else 502
+        raise SaleFlowError(status, exc.detail) from exc
+    return content, f"voucher-{voucher.number}.pdf"
+
+
+def _editable_universal_sale(session: Session, user: User, sale_id: int) -> Sale:
+    sale = _owned_universal_sale(
+        session, user, sale_id, forbidden="No podés cargar pasajeros en esta venta"
+    )
+    if sale.emission_status not in (
+        EmissionStatus.PRODUCT_SELECTED.value,
+        EmissionStatus.PASSENGERS_COMPLETE.value,
+    ):
+        raise SaleFlowError(409, "Esta venta no está lista para cargar pasajeros")
+    return sale
+
+
+def _payable_universal_sale(session: Session, user: User, sale_id: int) -> Sale:
+    sale = _owned_universal_sale(session, user, sale_id)
+    if sale.emission_status not in (
+        EmissionStatus.PASSENGERS_COMPLETE.value,
+        EmissionStatus.ISSUED.value,
+        EmissionStatus.EMISSION_FAILED.value,
+    ):
+        raise SaleFlowError(409, "Esta venta no está lista para cobrar")
+    return sale
+
+
+def _owned_universal_sale(
+    session: Session,
+    user: User,
+    sale_id: int,
+    *,
+    forbidden: str = "No podés cobrar esta venta",
+    allow_admin: bool = False,
+) -> Sale:
+    sale = session.get(Sale, sale_id)
+    if sale is None:
+        raise SaleFlowError(404, "No encontramos esa venta")
+    owner = sale.created_by_user_id == user.id
+    admin_reader = allow_admin and user.role == UserRole.ADMIN
+    if not owner and not admin_reader:
+        raise SaleFlowError(403, forbidden)
+    company = session.get(Company, sale.company_id)
+    if company is None or company.slug != _UNIVERSAL_SLUG:
+        raise SaleFlowError(400, "Esta venta no es de Universal")
+    return sale
+
+
 def get_inter_assist_sale(session: Session, user: User, sale_id: int) -> SaleDetailResponse:
     sale = _owned_inter_assist_sale(
         session, user, sale_id, forbidden="No podés ver esta venta"
@@ -841,6 +1298,8 @@ def _sale_detail_for_company(session: Session, sale: Sale) -> SaleDetailResponse
         return sale_detail(session, sale, _OMINT_SLUG)
     if company.slug == _INTER_ASSIST_SLUG:
         return sale_detail(session, sale, _INTER_ASSIST_SLUG)
+    if company.slug == _UNIVERSAL_SLUG:
+        return sale_detail(session, sale, _UNIVERSAL_SLUG)
     raise SaleFlowError(400, "La emisión para esta compañía todavía no está disponible")
 
 
@@ -881,8 +1340,8 @@ def sale_detail(session: Session, sale: Sale, company_slug: str) -> SaleDetailRe
     voucher_url = None
     if voucher is not None:
         voucher_url = (
-            _public_inter_assist_voucher_url(sale.id or 0)
-            if company_slug == _INTER_ASSIST_SLUG
+            _public_voucher_pdf_url(sale.id or 0)
+            if company_slug in {_INTER_ASSIST_SLUG, _UNIVERSAL_SLUG}
             else voucher.url
         )
     return SaleDetailResponse(
@@ -938,7 +1397,7 @@ def download_inter_assist_voucher_pdf(
     return content, filename
 
 
-def _public_inter_assist_voucher_url(sale_id: int) -> str:
+def _public_voucher_pdf_url(sale_id: int) -> str:
     path = f"/v1/sales/{sale_id}/voucher/pdf"
     base = get_settings().public_api_base_url.strip().rstrip("/")
     return f"{base}{path}" if base else path
@@ -1581,8 +2040,8 @@ def _confirm_response(
 ) -> PaymentConfirmResponse:
     voucher_url = None
     if voucher is not None:
-        if company_slug == _INTER_ASSIST_SLUG:
-            voucher_url = _public_inter_assist_voucher_url(sale.id or 0)
+        if company_slug in {_INTER_ASSIST_SLUG, _UNIVERSAL_SLUG}:
+            voucher_url = _public_voucher_pdf_url(sale.id or 0)
         else:
             voucher_url = voucher.url
     return PaymentConfirmResponse(

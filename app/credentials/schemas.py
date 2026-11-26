@@ -13,8 +13,15 @@ class CardinalCredentialWrite(BaseModel):
     agente_emisor_secreto: str = ""
 
 
+class UniversalCredentialWrite(BaseModel):
+    """RowId de Siebel. Usuario y convenio siguen siendo los del servidor."""
+
+    organizacion_emisora: str = Field(min_length=1, max_length=40)
+
+
 CREDENTIAL_WRITES: dict[str, type[BaseModel]] = {
     "cardinal": CardinalCredentialWrite,
+    "universal": UniversalCredentialWrite,
 }
 
 
