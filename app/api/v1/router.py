@@ -5,6 +5,7 @@ from app.api.v1 import (
     auth,
     companies,
     credentials,
+    nave,
     plans,
     promotions,
     quotes,
@@ -25,3 +26,4 @@ router.include_router(plans.router, prefix="/plans", tags=["Plans"])
 router.include_router(promotions.router, prefix="/promotions", tags=["Promotions"])
 router.include_router(quotes.router, prefix="/quotes", tags=["Quotes"])
 router.include_router(sales.router, prefix="/sales", tags=["Sales"])
+router.include_router(nave.router, prefix="/nave", tags=["Nave"])

@@ -121,6 +121,13 @@ class QuotePlan(BaseModel):
         default=None,
         description="Nombre de la promoción aplicada (ej. PROMO 40% OFF), si la compañía lo informa",
     )
+    promocion_id: int | None = Field(
+        default=None,
+        description=(
+            "Id de la promo en la compañía. Inter Assist: mandarlo tal cual en "
+            "quote.promocion_id al abrir la venta. 0 o null = sin promo (doc §5.4)."
+        ),
+    )
     exceptions: list[PlanException] = Field(default_factory=list, description="Excepciones del producto (para mostrar en 'Ver más'), si la compañía las informa")
 
 

@@ -17,12 +17,15 @@ como días corridos por viaje, según el schema:
 El plan es el mismo; solo cambia la key. Si esa key está en 0, no se cotiza.
 
 Promociones (promociones_object):
+- Solo descuento plano tipo Porcentaje (id 4). No 2x1 / grupo / etc.
 - Precio lista → base_rate / base_rate_usd
 - Precio con promo → final_rate / final_rate_usd
 - % y nombre → discount_pct / promotion_name
+- promocion_id: id a mandar en checkout; 0 si no hay promo (doc Inter §5.4)
 Si no hay promo activa, base_rate queda null (solo final_rate).
 
 IMPORTANTE: no usar POST /api/ventas para cotizar (emite vouchers).
+Cotización local desde GET /api/planes (store-cotizacion es opcional en la doc).
 """
 from __future__ import annotations
 
@@ -294,8 +297,9 @@ class InterAssistQuoteProvider:
         promo = self._select_active_promotion(raw, reference_date=date.today())
         discount_pct: Decimal | None = None
         promotion_name: str | None = None
+        promocion_id: int | None = None
         if promo is not None:
-            discount_pct, promotion_name = promo
+            promocion_id, discount_pct, promotion_name = promo
             final_total = (
                 list_total * (Decimal("1") - (discount_pct / Decimal("100")))
             ).quantize(Decimal("0.01"))
@@ -347,6 +351,8 @@ class InterAssistQuoteProvider:
             base_rate=list_rate if has_promo_price else None,
             discount_pct=discount_pct if has_promo_price else None,
             promotion_name=promotion_name if has_promo_price else None,
+            # Siempre número: id de promo o 0 (doc: 0 = sin promo al emitir/checkout).
+            promocion_id=promocion_id if has_promo_price else 0,
         )
 
     def _matches_destino(self, raw: dict[str, Any], destino_id: int) -> bool:
@@ -389,15 +395,18 @@ class InterAssistQuoteProvider:
 
     def _select_active_promotion(
         self, raw: dict[str, Any], reference_date: date
-    ) -> tuple[Decimal, str] | None:
+    ) -> tuple[int, Decimal, str] | None:
         """
-        Elige la mejor promo activa de promociones_object (mayor %).
-        Solo tipo porcentaje. Valida activo + ventana programada.
+        Elige la mejor promo activa de promociones_object (mayor %; empate → mayor id).
+        Solo descuento plano tipo Porcentaje (id 4). No 2x1, grupo ni otros.
+        Valida activo + ventana programada.
+        Devuelve (promocion_id, %, nombre) para mandarlo al checkout.
         """
         items = raw.get("promociones_object") or []
         if not isinstance(items, list):
             return None
 
+        best_id: int | None = None
         best_pct: Decimal | None = None
         best_name: str | None = None
         for entry in items:
@@ -406,11 +415,7 @@ class InterAssistQuoteProvider:
             if entry.get("activo") is False:
                 continue
 
-            tipo = entry.get("tipo_promocion") or {}
-            tipo_nombre = ""
-            if isinstance(tipo, dict):
-                tipo_nombre = str(tipo.get("nombre") or "").strip().lower()
-            if tipo_nombre and "porcentaje" not in tipo_nombre:
+            if not self._is_flat_percentage_promotion(entry):
                 continue
 
             pct = self._parse_decimal(entry.get("porcentaje"))
@@ -425,14 +430,45 @@ class InterAssistQuoteProvider:
                 if end is not None and reference_date > end:
                     continue
 
+            promo_id = entry.get("id")
+            try:
+                promo_id_int = int(promo_id)
+            except (TypeError, ValueError):
+                continue
+            if promo_id_int <= 0:
+                continue
+
             nombre = str(entry.get("nombre") or "").strip() or f"{pct}% OFF"
-            if best_pct is None or pct > best_pct:
+            better = best_pct is None or pct > best_pct
+            tied_higher_id = (
+                best_pct is not None
+                and pct == best_pct
+                and best_id is not None
+                and promo_id_int > best_id
+            )
+            if better or tied_higher_id:
+                best_id = promo_id_int
                 best_pct = pct
                 best_name = nombre
 
-        if best_pct is None or best_name is None:
+        if best_id is None or best_pct is None or best_name is None:
             return None
-        return best_pct.quantize(Decimal("0.01")), best_name
+        return best_id, best_pct.quantize(Decimal("0.01")), best_name
+
+    def _is_flat_percentage_promotion(self, entry: dict[str, Any]) -> bool:
+        """True solo para descuento % plano (tipo 4 / nombre 'Porcentaje')."""
+        tipo = entry.get("tipo_promocion") or {}
+        if not isinstance(tipo, dict):
+            return False
+        tipo_id = tipo.get("id")
+        try:
+            if tipo_id is not None and int(tipo_id) == 4:
+                return True
+        except (TypeError, ValueError):
+            pass
+        tipo_nombre = str(tipo.get("nombre") or "").strip().lower()
+        # Exacto "porcentaje". Evita "2 x 1 (Porcentaje)", "Porcentaje grupo", etc.
+        return tipo_nombre == "porcentaje"
 
     def _parse_api_date(self, value: Any) -> date | None:
         if value is None:

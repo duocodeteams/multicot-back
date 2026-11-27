@@ -41,6 +41,11 @@ PAYMENT_METHOD_NAMES = {
     "TVD": "Visa Débito",
     "TNA": "Tarjeta Naranja",
     "MP": "Mercado Pago",
+    "MERCADOPAGO": "Mercado Pago",
+    "PAYWAY": "Payway",
+    "NEW_TRAVEL": "New Travel",
+    "NAVE": "Nave",
+    "SIMULATED": "Simulado",
 }
 
 # urlNotificacion solo llega con Mercado Pago. El POST trae IdStatus
