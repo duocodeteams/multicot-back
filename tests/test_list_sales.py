@@ -1,4 +1,4 @@
-"""Listado de ventas para el admin."""
+"""Listado de ventas: el admin ve todas y cada usuario las suyas."""
 
 from datetime import date, datetime, timedelta
 from decimal import Decimal
@@ -70,7 +70,7 @@ class ListSalesTest(TestCase):
             created_at=datetime(2026, 11, 10, 10, 0),
         )
 
-        page = list_sales(self.session, limit=50, offset=0)
+        page = list_sales(self.session, self.admin, limit=50, offset=0)
 
         self.assertEqual(page.total, 2)
         self.assertEqual([item.id for item in page.items], [newer.id, older.id])
@@ -103,6 +103,7 @@ class ListSalesTest(TestCase):
 
         page = list_sales(
             self.session,
+            self.admin,
             emission_status="issued",
             payment_status="approved",
             company="Omint",
@@ -123,7 +124,7 @@ class ListSalesTest(TestCase):
                 created_at=datetime(2026, 11, 1, 10, 0) + timedelta(days=day),
             )
 
-        page = list_sales(self.session, limit=1, offset=1)
+        page = list_sales(self.session, self.admin, limit=1, offset=1)
 
         self.assertEqual(page.total, 3)
         self.assertEqual(len(page.items), 1)
@@ -151,9 +152,63 @@ class ListSalesTest(TestCase):
             get_sale_for_user(self.session, self.seller, foreign.id)
         self.assertEqual(raised.exception.status_code, 403)
 
+    def test_user_sees_only_sales_they_created(self) -> None:
+        own = self._sale(
+            user_id=self.seller.id,
+            company_id=self.omint.id,
+            created_at=datetime(2026, 11, 7, 9, 0),
+        )
+        self._sale(
+            user_id=self.admin.id,
+            company_id=self.inter.id,
+            created_at=datetime(2026, 11, 8, 9, 0),
+        )
+
+        page = list_sales(self.session, self.seller, limit=50, offset=0)
+        same_user = list_sales(
+            self.session,
+            self.seller,
+            created_by_user_id=self.seller.id,
+        )
+
+        self.assertEqual(page.total, 1)
+        self.assertEqual([item.id for item in page.items], [own.id])
+        self.assertEqual([item.id for item in same_user.items], [own.id])
+
+    def test_user_cannot_list_another_users_sales(self) -> None:
+        with self.assertRaises(SaleFlowError) as raised:
+            list_sales(
+                self.session,
+                self.seller,
+                created_by_user_id=self.admin.id,
+            )
+        self.assertEqual(raised.exception.status_code, 403)
+
+    def test_admin_filters_by_creator(self) -> None:
+        seller_sale = self._sale(
+            user_id=self.seller.id,
+            company_id=self.omint.id,
+            created_at=datetime(2026, 11, 9, 9, 0),
+        )
+        self._sale(
+            user_id=self.admin.id,
+            company_id=self.inter.id,
+            created_at=datetime(2026, 11, 9, 10, 0),
+        )
+
+        page = list_sales(
+            self.session,
+            self.admin,
+            created_by_user_id=self.seller.id,
+        )
+
+        self.assertEqual(page.total, 1)
+        self.assertEqual(page.items[0].id, seller_sale.id)
+        self.assertEqual(page.items[0].created_by_user_id, self.seller.id)
+
     def test_rejects_unknown_status(self) -> None:
         with self.assertRaises(SaleFlowError) as raised:
-            list_sales(self.session, emission_status="emitida")
+            list_sales(self.session, self.admin, emission_status="emitida")
         self.assertEqual(raised.exception.status_code, 400)
 
     def _user(self, email: str, role: UserRole = UserRole.ADMIN) -> User:

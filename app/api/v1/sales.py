@@ -8,7 +8,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response,
 from sqlmodel import Session
 
 from app.core.database import get_session
-from app.core.security import get_current_admin_user, get_current_user
+from app.core.security import get_current_user
 from app.models import User
 from app.models.company import Company
 from app.models.sale import Sale
@@ -133,25 +133,30 @@ def create_sale(
 @router.get("", response_model=SaleListResponse)
 def list_sales_route(
     session: Annotated[Session, Depends(get_session)],
-    current_user: Annotated[User, Depends(get_current_admin_user)],
+    current_user: Annotated[User, Depends(get_current_user)],
     emission_status: str | None = Query(default=None),
     payment_status: str | None = Query(default=None),
     company: str | None = Query(default=None, description="Slug de la compañía"),
     agency_id: int | None = Query(default=None),
+    created_by_user_id: int | None = Query(
+        default=None,
+        description="Solo admin. Historial de ese usuario.",
+    ),
     created_from: date | None = Query(default=None),
     created_to: date | None = Query(default=None),
     limit: Annotated[int, Query(ge=1, le=100)] = 50,
     offset: Annotated[int, Query(ge=0)] = 0,
 ) -> SaleListResponse:
-    """Todas las ventas. Solo admin. Sin pasajeros: el detalle es GET /v1/sales/{id}."""
-    _ = current_user
+    """Ventas del usuario del token. El admin ve todas. Sin pasajeros: el detalle es GET /v1/sales/{id}."""
     try:
         return list_sales(
             session,
+            current_user,
             emission_status=emission_status,
             payment_status=payment_status,
             company=company,
             agency_id=agency_id,
+            created_by_user_id=created_by_user_id,
             created_from=created_from,
             created_to=created_to,
             limit=limit,

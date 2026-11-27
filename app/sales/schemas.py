@@ -92,7 +92,7 @@ class SaleResponse(BaseModel):
 
 
 class SaleListResponse(BaseModel):
-    """Listado de admin. El detalle sigue en GET /v1/sales/{id}."""
+    """Listado del usuario del token. El admin ve todas. El detalle sigue en GET /v1/sales/{id}."""
 
     items: list[SaleResponse]
     total: int
