@@ -798,6 +798,7 @@ def open_universal_sale(
         "list_currency": currency,
         "amount_usd": str(quote.amount_usd),
         "amount_local": str(quote.amount_local) if quote.amount_local is not None else None,
+        "product_name": (quote.product_name or quote.plan_name).strip(),
     }
     local_plan_id = _local_plan_id(session, company.id, product_id)
     if existing is None:
@@ -1048,7 +1049,7 @@ def _confirm_universal_sale(session: Session, sale: Sale) -> PaymentConfirmRespo
             lead_id=lead_id,
             control_number=f"DYS-UA-{sale.id}",
             organization_id=organization_id,
-            plan_name=sale.plan_name,
+            plan_name=str(context.get("product_name") or sale.plan_name).strip(),
             destination=destination,
             currency=sale.currency,
             amount=sale.amount,

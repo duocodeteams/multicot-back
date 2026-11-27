@@ -41,6 +41,7 @@ class UniversalQuoteSnapshot(BaseModel):
     trip_type: TripType
     days_range: int | None = None
     plan_name: str = Field(min_length=1, max_length=200)
+    product_name: str | None = Field(default=None, max_length=200)
     product_id: str | None = Field(default=None, max_length=80)
     amount_usd: Decimal = Field(gt=0)
     amount_local: Decimal | None = Field(default=None, gt=0)

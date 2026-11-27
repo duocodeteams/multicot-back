@@ -96,6 +96,10 @@ class QuotePlan(BaseModel):
     id: str = Field(..., description="Identificador único de la cotización")
     plan_id: str = Field(..., description="ID del plan")
     plan_name: str = Field(..., description="Nombre del plan (ej. CARDINAL 100)")
+    product_name: str | None = Field(
+        default=None,
+        description="Nombre de producto que la compañía exige al emitir. En Universal es el tag NombreProducto.",
+    )
     coverage_amount: Decimal = Field(..., description="Monto de cobertura (Tope Máximo Global)")
     benefits: list[Benefit] = Field(default_factory=list, description="Prestaciones del plan")
     net_rate: Decimal = Field(..., description="Tarifa neta (final_rate_usd menos comisión)")

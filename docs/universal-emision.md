@@ -26,7 +26,8 @@ En la cotización, el plan de Universal trae:
 
 - `id`: lead de esa cotización (`IdLeadOut`). Cambia en cada cotización. Es el `quote_id` de la venta. No volver a cotizar para validarlo.
 - `plan_id`: producto (`IdProducto`). Va en `quote.product_id`.
-- `plan_name`.
+- `plan_name`: nombre comercial, el tag `Producto`. Se muestra en el panel.
+- `product_name`: nombre de la lista de Siebel, el tag `NombreProducto`. Hay que reenviarlo al abrir la venta. El alta lo manda como nombre de producto. No usar `plan_name` para eso: si trae la promo, Siebel lo rechaza.
 - `final_rate_usd`: precio en dólares. Va en `quote.amount_usd`.
 - `final_rate`: precio local cuando Universal lo informa. Va en `quote.amount_local`.
 
@@ -48,7 +49,8 @@ Si el origen no es Argentina, la cotización no trae planes de Universal. No hac
     "destination_id": 3,
     "trip_type": "unico_viaje",
     "days_range": null,
-    "plan_name": "UNIVERSAL 100",
+    "plan_name": "Master DP 35%OFF (NO INCLUYE 18% IMPUESTO DE LEY)",
+    "product_name": "Master",
     "product_id": "PROD-1",
     "amount_usd": "120.50",
     "amount_local": "150000.00",
@@ -58,6 +60,7 @@ Si el origen no es Argentina, la cotización no trae planes de Universal. No hac
 ```
 
 - `quote_id` es `id` del plan, no `plan_id`.
+- `quote.product_name` es `product_name` del plan. Es el nombre que se emite. `plan_name` queda solo para mostrar.
 - No van `amount`, `currency` ni `promocion_id`.
 - `amount_usd` es obligatorio.
 - `amount_local` es obligatorio si `destination_id` es `1` (Argentina). Esa venta queda en ARS y el precio emitido es `amount_local`. En cualquier otro destino la venta queda en USD y el precio emitido es `amount_usd`.

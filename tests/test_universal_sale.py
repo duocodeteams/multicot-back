@@ -2,6 +2,7 @@
 
 from datetime import date
 from decimal import Decimal
+from xml.etree import ElementTree as ET
 from unittest import TestCase
 from unittest.mock import patch
 
@@ -54,7 +55,8 @@ def _quote(**overrides) -> UniversalQuoteSnapshot:
         origin="AR",
         destination_id=3,
         trip_type="unico_viaje",
-        plan_name="UNIVERSAL 100",
+        plan_name="Master DP 35%OFF (NO INCLUYE 18% IMPUESTO DE LEY)",
+        product_name="Master",
         product_id="PROD-1",
         amount_usd=Decimal("120.50"),
         amount_local=Decimal("150000.00"),
@@ -210,6 +212,24 @@ class UniversalQuoteOrganizationTest(TestCase):
         envelope = provider._build_envelope(request, "Europa", "Un viaje", ORG)
         self.assertIn(f"<ual:OrganizacionEmisora>{ORG}</ual:OrganizacionEmisora>", envelope)
 
+    def test_quote_separates_the_commercial_name_from_the_picklist_name(self) -> None:
+        datos = ET.fromstring(
+            """
+            <DatosLeadCotizadorOut>
+              <IdLeadOut>1-LEAD</IdLeadOut>
+              <IdProducto>1-PROD</IdProducto>
+              <Producto>Master DP 35%OFF (NO INCLUYE 18% IMPUESTO DE LEY)</Producto>
+              <NombreProducto>Master</NombreProducto>
+              <PrecioEmision>121.30</PrecioEmision>
+            </DatosLeadCotizadorOut>
+            """
+        )
+        plan = UniversalQuoteProvider()._datos_to_plan(datos)
+        self.assertEqual(plan.id, "1-LEAD")
+        self.assertEqual(plan.plan_id, "1-PROD")
+        self.assertEqual(plan.plan_name, "Master DP 35%OFF (NO INCLUYE 18% IMPUESTO DE LEY)")
+        self.assertEqual(plan.product_name, "Master")
+
 
 class UniversalSaleFlowTest(TestCase):
     def setUp(self) -> None:
@@ -351,6 +371,7 @@ class UniversalSaleFlowTest(TestCase):
         emit.assert_called_once()
         kwargs = emit.call_args.kwargs
         self.assertEqual(kwargs["organization_id"], ORG)
+        self.assertEqual(kwargs["plan_name"], "Master")
         self.assertEqual(kwargs["currency"], "ARS")
         self.assertEqual(kwargs["destination"], "Territorio Nacional")
         self.assertEqual(kwargs["passengers"][0].document_type, "cuit")

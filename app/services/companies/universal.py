@@ -200,10 +200,11 @@ class UniversalQuoteProvider:
         if not product_id:
             return None
 
-        # Regla Universal: el tag principal para el nombre es "Producto".
-        plan_name = self._child_text(datos, "Producto").strip()
-        if not plan_name:
-            plan_name = self._child_text(datos, "NombreProducto").strip() or product_id
+        # Producto es el nombre comercial (puede traer la promo). NombreProducto es
+        # el valor de la lista de Siebel y es el que acepta el alta.
+        picklist_name = self._child_text(datos, "NombreProducto").strip()
+        plan_name = self._child_text(datos, "Producto").strip() or picklist_name or product_id
+        product_name = picklist_name or plan_name
 
         precio_usd = self._parse_decimal(self._child_text(datos, "PrecioEmision"))
         if precio_usd is None:
@@ -244,6 +245,7 @@ class UniversalQuoteProvider:
             id=lead_id,
             plan_id=product_id,
             plan_name=plan_name,
+            product_name=product_name,
             coverage_amount=coverage_amount,
             benefits=benefits,
             net_rate=net_rate,
