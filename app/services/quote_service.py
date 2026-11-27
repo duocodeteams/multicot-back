@@ -3,7 +3,7 @@ import logging
 
 from sqlmodel import Session
 
-from app.credentials.service import resolve_cardinal_credentials
+from app.credentials.service import resolve_cardinal_credentials, resolve_universal_organization
 from app.models.user import User
 from app.plans.catalog import filter_and_markup_plans, load_catalogs
 from app.quotations.schemas import QuotePlan, QuoteRequest, QuoteResponse
@@ -55,6 +55,11 @@ def get_quotes(
                 quoted = provider.get_quotes(
                     request,
                     credentials=resolve_cardinal_credentials(session, user),
+                )
+            elif provider.company_slug == "universal":
+                quoted = provider.get_quotes(
+                    request,
+                    organization_id=resolve_universal_organization(session, user),
                 )
             else:
                 quoted = provider.get_quotes(request)

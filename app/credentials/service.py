@@ -1,8 +1,8 @@
 """Credenciales de agencia por compañía.
 
-Hoy el único formato es Cardinal. El resto de las compañías, Omint incluido,
-sigue leyendo Settings. Una agencia sin fila usa esas credenciales genéricas.
-Los vendedores usan la credencial de su agencia.
+Cardinal guarda guid y secreto. Universal guarda el RowId de Siebel.
+El resto, Omint incluido, sigue leyendo Settings. Una agencia sin fila usa
+las credenciales genéricas. Los vendedores usan la credencial de su agencia.
 """
 
 from __future__ import annotations
@@ -20,6 +20,7 @@ from app.credentials.schemas import (
     CREDENTIAL_WRITES,
     AgencyCredentialResponse,
     CardinalCredentials,
+    UniversalCredentialWrite,
 )
 from app.models.agency import Agency
 from app.models.company import Company
@@ -149,6 +150,31 @@ def resolve_cardinal_credentials(session: Session, user: User | None) -> Cardina
             agency_id,
         )
         return CardinalCredentials()
+
+
+def resolve_universal_organization(session: Session, user: User | None) -> str:
+    """RowId de la agencia. Si no tiene, el de UNIVERSAL_ORGANIZACION_EMISORA."""
+    fallback = get_settings().universal_organizacion_emisora.strip()
+    agency_id = agency_id_for_user(session, user)
+    if agency_id is None:
+        return fallback
+    company = _company_by_slug(session, "universal")
+    if company is None or company.id is None:
+        return fallback
+    row = _find_credential(session, agency_id, company.id)
+    if row is None or not row.active:
+        return fallback
+    plain = decrypt_for_admin(row.payload_encrypted)
+    if not plain:
+        logger.error("Universal: no se pudo leer la credencial de la agencia %s", agency_id)
+        return ""
+    try:
+        data = json.loads(plain)
+        parsed = UniversalCredentialWrite.model_validate(data)
+    except (json.JSONDecodeError, ValidationError):
+        logger.error("Universal: credencial inválida de la agencia %s", agency_id)
+        return ""
+    return parsed.organizacion_emisora.strip() or fallback
 
 
 def agency_id_for_user(session: Session, user: User | None) -> int | None:
