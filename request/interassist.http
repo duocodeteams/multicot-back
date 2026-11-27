@@ -4,7 +4,7 @@
 @appBaseUrl = http://localhost:8000
 @appEmail = admin@test.com
 @appPassword = password123
-@appToken = eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxIiwiZW1haWwiOiJhZG1pbkB0ZXN0LmNvbSIsInJvbGUiOiJhZG1pbiIsImFnZW5jeV9pZCI6bnVsbCwiZXhwIjoxNzg3MjMwODA1fQ.YVOLNr48CVqW83VSXczHPjqJm7RfVtI4JeBsvZ9dxvY
+@appToken = eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxIiwiZW1haWwiOiJhZG1pbkB0ZXN0LmNvbSIsInJvbGUiOiJhZG1pbiIsImFnZW5jeV9pZCI6bnVsbCwiZXhwIjoxNzk0NTcyOTMyfQ.98tt4chmhGC8wU-KGDvx7PIiCKIjh40abDCt_YzonQQ
 
 ### Inter Assist — listar planes (API externa)
 GET {{interassistBaseUrl}}/api/planes?page=1
@@ -228,3 +228,101 @@ Accept: application/json
 GET {{appBaseUrl}}/v1/sales/{{saleId}}/voucher/pdf?lang=es
 Authorization: Bearer {{appToken}}
 Accept: application/pdf
+
+### App — payment links Nave
+POST {{appBaseUrl}}/v1/nave/payment-links
+Authorization: Bearer {{appToken}}
+Content-Type: application/json
+Accept: application/json
+
+{
+  "amount": "177.00",
+  "product_name": "Asistencia Terrawind",
+  "product_description": "Plan prueba"
+}
+
+
+###
+### App — login
+POST {{appBaseUrl}}/v1/auth/login
+Content-Type: application/json
+Accept: application/json
+
+{
+  "email": "{{appEmail}}",
+  "password": "{{appPassword}}"
+}
+
+
+### Nave — token
+# Ejecutá este request primero. El link toma el access_token de la respuesta.
+@naveAudience = https://api.ranty.io/integrations
+@naveApiBase = https://api-sandbox.ranty.io/integrations
+@naveClientId = GuCZ6HnAXknZziKszlOutlmLwlHml62w
+@naveClientSecret = HzOELL-VpHKsYWPuhhf99BNpmgurlA_GP-qW_0MsqXUx3zziX50_n-3fkQVguJ7a
+@navePosId = f71ba756-1d80-4ab3-9f43-5dc247fd6c4a
+# @name naveAuth
+POST https://homoservices.apinaranja.com/security-ms/api/security/auth0/b2b/m2ms
+Content-Type: application/json
+Accept: application/json
+
+{
+  "client_id": "{{naveClientId}}",
+  "client_secret": "{{naveClientSecret}}",
+  "audience": "{{naveAudience}}"
+}
+
+### Nave — link de pago
+@naveToken = {{naveAuth.response.body.$.access_token}}
+POST {{naveApiBase}}/payment_requests/ecommerce
+Content-Type: application/json
+Accept: application/json
+Authorization: Bearer {{naveToken}}
+
+{
+  "external_payment_id": "order-111",
+  "seller": {
+    "pos_id": "{{navePosId}}"
+  },
+  "transactions": [
+    {
+      "amount": {
+        "currency": "ARS",
+        "value": "177.00"
+      },
+      "products": [
+        {
+          "name": "Nave product",
+          "description": "Nave description",
+          "quantity": 1,
+          "unit_price": {
+            "currency": "ARS",
+            "value": "177.00"
+          }
+        }
+      ]
+    }
+  ],
+  "buyer": {
+    "doc_type": "DNI",
+    "doc_number": "30123456",
+    "name": "User Platform",
+    "user_email": "user.platform@platform.com",
+    "user_id": "userplatform_id",
+    "billing_address": {
+      "street_1": "Platform 110",
+      "street_2": "optional_street",
+      "city": "Santa Fe",
+      "region": "Santa Fe",
+      "country": "AR",
+      "zipcode": "3000"
+    }
+  },
+  "additional_info": {
+    "callback_url": "https://tuplatform.com/order_status/order-111"
+  },
+  "duration_time": 3000
+}
+
+
+

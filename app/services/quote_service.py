@@ -90,6 +90,12 @@ def get_quotes(
                 len(dropped),
                 dropped,
             )
+            if provider.company_slug == "new_travel":
+                print(
+                    f"[NewTravel] catálogo: quoted={len(quoted)} kept={len(plans)} "
+                    f"dropped={dropped}",
+                    flush=True,
+                )
         else:
             logger.info(
                 "%s: trip_type=%s days_range=%s dest=%s quoted=%s (sin whitelist de catálogo)",

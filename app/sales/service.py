@@ -3,10 +3,13 @@
 from __future__ import annotations
 
 import hashlib
+import io
 import logging
+import zipfile
 from collections import Counter
 from datetime import date, datetime, time, timedelta
 from decimal import Decimal
+from urllib.parse import urlparse
 
 from sqlalchemy import func
 from sqlalchemy.exc import IntegrityError
@@ -43,11 +46,13 @@ from app.sales.schemas import (
     PaymentConfirmResponse,
     PaymentMethodOption,
     PaymentResponse,
+    PaywayCardOption,
     PaymentSimulate,
     PaymentStart,
     SaleDetailResponse,
     SaleListResponse,
     SaleResponse,
+    SaleVoucherItem,
     UniversalQuoteSnapshot,
 )
 from app.services.companies.inter_assist import InterAssistQuoteProvider
@@ -64,12 +69,18 @@ from app.services.companies.universal_emission import (
     universal_charge,
 )
 from app.services.companies.inter_assist_emission import (
+    InterAssistCheckoutResult,
     InterAssistClientDraft,
     InterAssistEmissionError,
+    InterAssistVoucherInfo,
+    PaywayCardsResult,
+    create_inter_assist_checkout,
     emit_inter_assist_sale,
     emission_type_and_periodo,
     fetch_voucher_pdf,
-    voucher_pdf_url,
+    get_inter_assist_checkout,
+    get_inter_assist_venta_vouchers,
+    list_payway_cards,
 )
 from app.services.companies.omint_emission import (
     DOCUMENT_TYPE_IDS,
@@ -475,6 +486,8 @@ def open_inter_assist_sale(
 
     _validate_inter_assist_quote_amount(plan_id, quote)
 
+    # Doc Inter §5.4: promocion_id explícito; 0 = forzar sin promo. No auto-resolver.
+    promocion_id = int(quote.promocion_id or 0)
     reference = _inter_assist_reference(user.id or 0, plan_id, quote)
     existing = session.exec(select(Sale).where(Sale.provider_reference == reference)).first()
     if existing is not None:
@@ -488,7 +501,7 @@ def open_inter_assist_sale(
 
     context = {
         "plan_id": plan_id,
-        "promocion_id": quote.promocion_id,
+        "promocion_id": promocion_id,
         "trip_type": quote.trip_type,
         "amount": str(quote.amount),
         "currency": quote.currency.upper(),
@@ -611,9 +624,11 @@ def set_inter_assist_passengers(
     )
     sale.emission_status = EmissionStatus.PASSENGERS_COMPLETE.value
     sale.updated_at = datetime.utcnow()
+    catalog = _load_payway_catalog()
+    payment_methods = _inter_assist_payment_methods(catalog)
     context = dict(sale.provider_context or {})
     context["receive_promotions"] = data.receive_promotions
-    context["payment_methods"] = [_SIMULATED_PAYMENT_METHOD]
+    context["payment_methods"] = payment_methods
     sale.provider_context = context
     flag_modified(sale, "provider_context")
     session.add(sale)
@@ -624,7 +639,7 @@ def set_inter_assist_passengers(
         success=True,
         http_status=200,
         request_payload={"passengers": len(data.passengers)},
-        response_payload={"payment_methods": [_SIMULATED_PAYMENT_METHOD]},
+        response_payload={"payment_methods": payment_methods},
         error_message=None,
     )
     _commit(session)
@@ -643,30 +658,97 @@ def start_inter_assist_payment(
     sale_id: int,
     data: PaymentStart,
 ) -> PaymentResponse:
-    """Abre un cobro simulado (pasarela propia). No llama a Inter Assist."""
+    """Abre el checkout de Mercado Pago o Payway en Inter Assist."""
     sale = _payable_inter_assist_sale(session, user, sale_id)
     _check_return_urls(data)
     if sale.emission_status == EmissionStatus.ISSUED.value:
         raise SaleFlowError(409, "Esta venta ya está emitida")
-    existing = _pending_payment(session, sale.id or 0)
-    if existing is not None and existing.checkout_url:
-        return _payment_response(sale, existing.checkout_url, created=False)
 
-    checkout_url = (
-        data.return_url_pending.strip()
-        or data.return_url_ok.strip()
-    )
+    gateway = _inter_assist_gateway(data.payment_method_id)
+    if gateway == PaymentProvider.PAYWAY.value and _local_return_host(data.return_url_ok):
+        raise SaleFlowError(
+            400,
+            "Payway no acepta volver a localhost. Definí PORTAL_BASE_URL con un https público y reintentá",
+        )
+    card_id, installments = _payway_selection(sale, data, gateway)
+    existing = _pending_payment(session, sale.id or 0)
+    if existing is not None and _reusable_inter_assist_checkout(
+        existing, gateway, card_id, installments, data
+    ):
+        return _payment_response(
+            sale,
+            existing.checkout_url,
+            created=False,
+            amount=existing.amount,
+            currency=existing.currency,
+            exchange_rate=_payment_exchange_rate(existing),
+        )
+
+    plan_id, promocion_id, clientes = _inter_assist_clientes(session, sale)
+    if sale.departure_date is None or not sale.trip_type:
+        raise SaleFlowError(400, "La venta no tiene datos de viaje")
+    pending_url = data.return_url_pending.strip()
+    try:
+        checkout = create_inter_assist_checkout(
+            gateway=gateway,
+            plan_id=plan_id,
+            trip_type=sale.trip_type,
+            days_range=sale.days_range,
+            departure_date=sale.departure_date,
+            return_date=sale.return_date,
+            clientes=clientes,
+            promocion_id=promocion_id,
+            success_url=data.return_url_ok.strip(),
+            failure_url=data.return_url_error.strip(),
+            pending_url=pending_url,
+            notification_url=_inter_assist_notification_url(sale.id or 0),
+            credit_card_id=card_id,
+            installments=installments,
+        )
+    except InterAssistEmissionError as exc:
+        _add_attempt(
+            session,
+            sale,
+            step="process_payment",
+            success=False,
+            http_status=exc.http_status or exc.status_code,
+            request_payload=exc.request_body or {"gateway": gateway},
+            response_payload=exc.response_body or {"detail": exc.detail},
+            error_message=exc.detail,
+        )
+        _commit(session)
+        status = exc.status_code if exc.status_code < 500 else 502
+        raise SaleFlowError(status, exc.detail) from exc
+
+    if not checkout.checkout_url:
+        raise SaleFlowError(502, "Inter Assist no devolvió el link de pago")
+    if checkout.amount is None:
+        raise SaleFlowError(502, "Inter Assist no devolvió el monto en pesos")
+    currency = (checkout.currency or "ARS")[:3]
+    if currency != "ARS":
+        raise SaleFlowError(
+            502,
+            f"Inter Assist devolvió el cobro en {currency}; se esperaba ARS",
+        )
+
+    _reject_pending_payments(session, sale.id or 0)
     payment = Payment(
         sale_id=sale.id or 0,
-        provider=PaymentProvider.SIMULATED.value,
+        provider=gateway,
         status=PaymentStatus.PENDING.value,
-        amount=sale.amount,
-        currency=sale.currency,
-        checkout_url=checkout_url[:2000],
-        external_id=(data.payment_method_id or "simulated").strip()[:80],
-        financing_id=None,
+        amount=checkout.amount,
+        currency=currency,
+        checkout_url=checkout.checkout_url[:2000],
+        external_id=checkout.order_uuid[:80],
+        financing_id=str(installments) if installments is not None else None,
         provider_data={
-            "simulated": True,
+            "gateway": gateway,
+            "order_uuid": checkout.order_uuid,
+            "credit_card_id": card_id,
+            "installments": installments,
+            "exchange_rate": str(checkout.exchange_rate) if checkout.exchange_rate is not None else None,
+            "quoted_amount": str(sale.amount),
+            "quoted_currency": sale.currency,
             "return_url_ok": data.return_url_ok.strip(),
             "return_url_error": data.return_url_error.strip(),
             "return_url_pending": data.return_url_pending.strip(),
@@ -681,14 +763,21 @@ def start_inter_assist_payment(
         sale,
         step="process_payment",
         success=True,
-        http_status=200,
-        request_payload={"provider": PaymentProvider.SIMULATED.value},
-        response_payload={"checkout_url": checkout_url},
+        http_status=checkout.status_code,
+        request_payload=checkout.request_body,
+        response_payload=checkout.response_body,
         error_message=None,
     )
     _commit(session)
     session.refresh(sale)
-    return _payment_response(sale, checkout_url, created=True)
+    return _payment_response(
+        sale,
+        checkout.checkout_url,
+        created=True,
+        amount=checkout.amount,
+        currency=currency,
+        exchange_rate=checkout.exchange_rate,
+    )
 
 
 def simulate_inter_assist_payment(
@@ -741,7 +830,7 @@ def confirm_inter_assist_payment(
     user: User,
     sale_id: int,
 ) -> PaymentConfirmResponse:
-    """Si el pago simulado está aprobado, emite en Inter Assist y guarda vouchers."""
+    """Consulta la orden en Inter Assist y, si ya se emitió, guarda el voucher."""
     sale = _owned_inter_assist_sale(session, user, sale_id)
     return _confirm_inter_assist_sale(session, sale)
 
@@ -1193,6 +1282,20 @@ def _owned_universal_sale(
     return sale
 
 
+def confirm_inter_assist_from_notification(
+    session: Session,
+    sale_id: int,
+) -> PaymentConfirmResponse:
+    """Aviso de Inter Assist. El estado real lo dice el GET de la orden."""
+    sale = session.get(Sale, sale_id)
+    if sale is None:
+        raise SaleFlowError(404, "No encontramos esa venta")
+    company = session.get(Company, sale.company_id)
+    if company is None or company.slug != _INTER_ASSIST_SLUG:
+        raise SaleFlowError(400, "Esta venta no es de Inter Assist")
+    return _confirm_inter_assist_sale(session, sale, from_notification=True)
+
+
 def get_inter_assist_sale(session: Session, user: User, sale_id: int) -> SaleDetailResponse:
     sale = _owned_inter_assist_sale(
         session, user, sale_id, forbidden="No podés ver esta venta"
@@ -1301,6 +1404,10 @@ def _sale_detail_for_company(session: Session, sale: Sale) -> SaleDetailResponse
         return sale_detail(session, sale, _INTER_ASSIST_SLUG)
     if company.slug == _UNIVERSAL_SLUG:
         return sale_detail(session, sale, _UNIVERSAL_SLUG)
+    if company.slug == "terrawind":
+        return sale_detail(session, sale, "terrawind")
+    if company.slug == "new_travel":
+        return sale_detail(session, sale, "new_travel")
     raise SaleFlowError(400, "La emisión para esta compañía todavía no está disponible")
 
 
@@ -1327,6 +1434,8 @@ def passengers_response(session: Session, sale: Sale) -> PassengersResponse:
 
 
 def sale_detail(session: Session, sale: Sale, company_slug: str) -> SaleDetailResponse:
+    if company_slug == _INTER_ASSIST_SLUG:
+        _ensure_inter_assist_payment_methods(session, sale)
     rows = session.exec(
         select(Passenger).where(Passenger.sale_id == sale.id).order_by(Passenger.id)
     ).all()
@@ -1335,14 +1444,37 @@ def sale_detail(session: Session, sale: Sale, company_slug: str) -> SaleDetailRe
     if sale.emission_status == EmissionStatus.ISSUED.value:
         voucher = _voucher_for(session, sale.id or 0)
     checkout_url = None
+    payment_amount = None
+    payment_currency = None
+    exchange_rate = None
+    payment_row = pending
+    if payment_row is None:
+        payment_row = _latest_payment(session, sale.id or 0)
     if pending is not None and sale.payment_status == SalePaymentStatus.PENDING.value:
         checkout_url = pending.checkout_url
+    if company_slug == _INTER_ASSIST_SLUG and payment_row is not None:
+        payment_amount = payment_row.amount
+        payment_currency = payment_row.currency
+        exchange_rate = _payment_exchange_rate(payment_row)
     base = sale_to_response(sale, company_slug)
     voucher_url = None
-    if voucher is not None:
+    vouchers: list[SaleVoucherItem] = []
+    if company_slug == _INTER_ASSIST_SLUG and sale.emission_status == EmissionStatus.ISSUED.value:
+        # Si hay más pax que vouchers guardados, rehidratar desde GET /api/ventas.
+        if len(_inter_assist_voucher_ids(sale)) < len(rows):
+            _refresh_inter_assist_vouchers_from_provider(session, sale)
+            session.refresh(sale)
+            if sale.emission_status == EmissionStatus.ISSUED.value:
+                voucher = _voucher_for(session, sale.id or 0)
+        vouchers = _inter_assist_voucher_items(sale)
+        if vouchers:
+            voucher_url = vouchers[0].url
+        elif voucher is not None:
+            voucher_url = _public_inter_assist_voucher_url(sale.id or 0)
+    elif voucher is not None:
         voucher_url = (
             _public_voucher_pdf_url(sale.id or 0)
-            if company_slug in {_INTER_ASSIST_SLUG, _UNIVERSAL_SLUG}
+            if company_slug == _UNIVERSAL_SLUG
             else voucher.url
         )
     return SaleDetailResponse(
@@ -1351,8 +1483,16 @@ def sale_detail(session: Session, sale: Sale, company_slug: str) -> SaleDetailRe
         passengers=[_passenger_response(row) for row in rows],
         payment_methods=_payment_method_options(sale),
         checkout_url=checkout_url,
-        voucher_number=voucher.number if voucher else None,
+        voucher_number=(
+            vouchers[0].number
+            if vouchers
+            else (voucher.number if voucher else None)
+        ),
         voucher_url=voucher_url,
+        vouchers=vouchers,
+        payment_amount=payment_amount,
+        payment_currency=payment_currency,
+        exchange_rate=exchange_rate,
     )
 
 
@@ -1361,6 +1501,7 @@ def download_inter_assist_voucher_pdf(
     user: User,
     sale_id: int,
     lang: str = "es",
+    voucher_id: int | None = None,
 ) -> tuple[bytes, str]:
     """Proxy del PDF: el front no puede abrir la URL de Inter Assist (pide API Key)."""
     sale = _owned_inter_assist_sale(
@@ -1372,15 +1513,51 @@ def download_inter_assist_voucher_pdf(
     )
     if sale.emission_status != EmissionStatus.ISSUED.value:
         raise SaleFlowError(409, "Esta venta todavía no tiene voucher emitido")
-    voucher = _voucher_for(session, sale.id or 0)
-    if voucher is None or not (voucher.external_id or "").strip():
+    ids = _inter_assist_voucher_ids(sale)
+    if not ids:
         raise SaleFlowError(404, "No encontramos el voucher de esta venta")
+    if voucher_id is None:
+        target_id = ids[0]
+    else:
+        if voucher_id not in ids:
+            raise SaleFlowError(404, "Ese voucher no pertenece a esta venta")
+        target_id = voucher_id
+    content = _fetch_inter_assist_pdf(target_id, lang=lang)
+    filename = f"voucher-{target_id}.pdf"
+    return content, filename
+
+
+def download_inter_assist_vouchers_zip(
+    session: Session,
+    user: User,
+    sale_id: int,
+    lang: str = "es",
+) -> tuple[bytes, str]:
+    """Zip con un PDF por voucher (útil con varios pasajeros)."""
+    sale = _owned_inter_assist_sale(
+        session,
+        user,
+        sale_id,
+        forbidden="No podés ver el voucher de esta venta",
+        allow_admin=True,
+    )
+    if sale.emission_status != EmissionStatus.ISSUED.value:
+        raise SaleFlowError(409, "Esta venta todavía no tiene voucher emitido")
+    ids = _inter_assist_voucher_ids(sale)
+    if not ids:
+        raise SaleFlowError(404, "No encontramos vouchers de esta venta")
+    buffer = io.BytesIO()
+    with zipfile.ZipFile(buffer, "w", compression=zipfile.ZIP_DEFLATED) as archive:
+        for vid in ids:
+            content = _fetch_inter_assist_pdf(vid, lang=lang)
+            archive.writestr(f"voucher-{vid}.pdf", content)
+    filename = f"vouchers-sale-{sale.id}.zip"
+    return buffer.getvalue(), filename
+
+
+def _fetch_inter_assist_pdf(voucher_id: int, *, lang: str) -> bytes:
     try:
-        voucher_id = int(str(voucher.external_id).strip())
-    except ValueError as exc:
-        raise SaleFlowError(502, "El id del voucher de Inter Assist no es válido") from exc
-    try:
-        content = fetch_voucher_pdf(voucher_id, lang=lang)
+        return fetch_voucher_pdf(voucher_id, lang=lang)
     except InterAssistEmissionError as exc:
         status = exc.status_code if exc.status_code < 500 else 502
         if exc.status_code == 401:
@@ -1394,12 +1571,79 @@ def download_inter_assist_voucher_pdf(
                 "Inter Assist no autorizó el PDF (403). Falta el scope vouchers en la API Key",
             ) from exc
         raise SaleFlowError(status, exc.detail) from exc
-    filename = f"voucher-{voucher.number or voucher_id}.pdf"
-    return content, filename
 
 
 def _public_voucher_pdf_url(sale_id: int) -> str:
     path = f"/v1/sales/{sale_id}/voucher/pdf"
+    base = get_settings().public_api_base_url.strip().rstrip("/")
+    return f"{base}{path}" if base else path
+
+
+def _inter_assist_voucher_ids(sale: Sale) -> list[int]:
+    context = sale.provider_context or {}
+    raw_meta = context.get("vouchers")
+    if isinstance(raw_meta, list) and raw_meta:
+        ids: list[int] = []
+        for item in raw_meta:
+            if not isinstance(item, dict):
+                continue
+            try:
+                value = int(item.get("id"))
+            except (TypeError, ValueError):
+                continue
+            if value > 0 and value not in ids:
+                ids.append(value)
+        if ids:
+            return ids
+    raw = context.get("voucher_ids") or []
+    ids = []
+    if isinstance(raw, list):
+        for item in raw:
+            try:
+                value = int(item)
+            except (TypeError, ValueError):
+                continue
+            if value > 0 and value not in ids:
+                ids.append(value)
+    return ids
+
+
+def _inter_assist_voucher_items(sale: Sale) -> list[SaleVoucherItem]:
+    sale_id = sale.id or 0
+    context = sale.provider_context or {}
+    meta_by_id: dict[int, dict] = {}
+    raw_meta = context.get("vouchers")
+    if isinstance(raw_meta, list):
+        for item in raw_meta:
+            if not isinstance(item, dict):
+                continue
+            try:
+                vid = int(item.get("id"))
+            except (TypeError, ValueError):
+                continue
+            if vid > 0:
+                meta_by_id[vid] = item
+
+    items: list[SaleVoucherItem] = []
+    for vid in _inter_assist_voucher_ids(sale):
+        meta = meta_by_id.get(vid) or {}
+        items.append(
+            SaleVoucherItem(
+                id=vid,
+                number=str(vid),
+                url=_public_inter_assist_voucher_url(sale_id, voucher_id=vid),
+                first_name=(str(meta.get("first_name") or "").strip() or None),
+                last_name=(str(meta.get("last_name") or "").strip() or None),
+                document_number=(str(meta.get("document_number") or "").strip() or None),
+            )
+        )
+    return items
+
+
+def _public_inter_assist_voucher_url(sale_id: int, voucher_id: int | None = None) -> str:
+    path = f"/v1/sales/{sale_id}/voucher/pdf"
+    if voucher_id is not None:
+        path = f"{path}?voucher_id={voucher_id}"
     base = get_settings().public_api_base_url.strip().rstrip("/")
     return f"{base}{path}" if base else path
 
@@ -1466,7 +1710,7 @@ def _inter_assist_reference(user_id: int, plan_id: str, quote: InterAssistQuoteS
 
 
 def _validate_inter_assist_quote_amount(plan_id: str, quote: InterAssistQuoteSnapshot) -> None:
-    """Recalcula con el cotizador local; si hay match y diverge mucho, rechaza."""
+    """Recalcula con el cotizador local; valida monto y promocion_id según doc Inter."""
     settings = get_settings()
     if not settings.interassist_api_key.strip():
         return
@@ -1488,10 +1732,40 @@ def _validate_inter_assist_quote_amount(plan_id: str, quote: InterAssistQuoteSna
     match = next((plan for plan in plans if str(plan.id) == str(plan_id)), None)
     if match is None:
         return
-    quoted = Decimal(str(match.final_rate))
-    if quoted <= 0:
+
+    sent_promo = int(quote.promocion_id or 0)
+    plan_promo = int(match.promocion_id or 0)
+    list_rate = match.base_rate if match.base_rate is not None else match.final_rate
+    promo_rate = match.final_rate
+    provider_amount = _inter_assist_provider_amount(quote)
+
+    if sent_promo > 0 and plan_promo > 0 and sent_promo != plan_promo:
+        raise SaleFlowError(
+            400,
+            f"promocion_id {sent_promo} no coincide con la promo cotizada del plan ({plan_promo})",
+        )
+    if sent_promo > 0 and plan_promo == 0:
+        raise SaleFlowError(
+            400,
+            "Esa promoción no aplica en la cotización actual (solo descuento % plano)",
+        )
+    if (
+        sent_promo == 0
+        and plan_promo > 0
+        and promo_rate is not None
+        and promo_rate > 0
+        and abs(provider_amount - promo_rate) / promo_rate <= _AMOUNT_TOLERANCE
+    ):
+        raise SaleFlowError(
+            400,
+            f"El precio incluye promoción; mandá promocion_id={plan_promo} (0 fuerza cobro sin promo)",
+        )
+
+    expected = promo_rate if sent_promo > 0 else list_rate
+    if expected is None or expected <= 0:
         return
-    delta = abs(quoted - quote.amount) / quoted
+    expected_dec = Decimal(str(expected))
+    delta = abs(expected_dec - provider_amount) / expected_dec
     if delta > _AMOUNT_TOLERANCE:
         raise SaleFlowError(
             400,
@@ -1499,14 +1773,41 @@ def _validate_inter_assist_quote_amount(plan_id: str, quote: InterAssistQuoteSna
         )
 
 
-def _confirm_inter_assist_sale(session: Session, sale: Sale) -> PaymentConfirmResponse:
+def _inter_assist_provider_amount(quote: InterAssistQuoteSnapshot) -> Decimal:
+    """Monto del proveedor sin markup de catálogo local."""
+    if quote.net_amount is not None and quote.net_amount > 0:
+        return Decimal(str(quote.net_amount))
+    amount = Decimal(str(quote.amount))
+    markup = Decimal(str(quote.markup or 0))
+    if markup <= 0:
+        return amount
+    return (amount / (Decimal("1") + markup / Decimal("100"))).quantize(Decimal("0.01"))
+
+
+def _confirm_inter_assist_sale(
+    session: Session,
+    sale: Sale,
+    *,
+    from_notification: bool = False,
+) -> PaymentConfirmResponse:
     if sale.emission_status == EmissionStatus.ISSUED.value:
         voucher = _voucher_for(session, sale.id or 0)
         return _confirm_response(
             sale, True, voucher, company_slug=_INTER_ASSIST_SLUG
         )
 
+    payment = _latest_payment(session, sale.id or 0)
+    if payment is not None and payment.provider in {
+        PaymentProvider.MERCADOPAGO.value,
+        PaymentProvider.PAYWAY.value,
+    }:
+        return _confirm_inter_assist_checkout(
+            session, sale, payment, from_notification=from_notification
+        )
+
     if sale.payment_status == SalePaymentStatus.REJECTED.value:
+        if from_notification:
+            return _confirm_response(sale, False, None, company_slug=_INTER_ASSIST_SLUG)
         raise SaleFlowError(409, "El pago de esta venta fue rechazado")
     if sale.payment_status == SalePaymentStatus.PENDING.value:
         return _confirm_response(
@@ -1591,8 +1892,9 @@ def _confirm_inter_assist_sale(session: Session, sale: Sale) -> PaymentConfirmRe
     sale.updated_at = datetime.utcnow()
     session.add(sale)
 
-    primary_voucher_id = result.voucher_ids[0]
-    voucher = _save_inter_assist_voucher(session, sale, primary_voucher_id, result.voucher_ids)
+    voucher = _persist_inter_assist_issued_vouchers(
+        session, sale, result.venta_id, result.voucher_ids
+    )
     _add_attempt(
         session,
         sale,
@@ -1610,11 +1912,120 @@ def _confirm_inter_assist_sale(session: Session, sale: Sale) -> PaymentConfirmRe
     )
 
 
+def _persist_inter_assist_issued_vouchers(
+    session: Session,
+    sale: Sale,
+    venta_id: int | None,
+    voucher_ids: list[int],
+) -> Voucher | None:
+    """Doc Inter: persistir cada voucher_id; detalle en GET /api/ventas/{id}."""
+    infos = _load_inter_assist_voucher_infos(venta_id, voucher_ids)
+    info_by_id = {info.id: info for info in infos if info.id > 0}
+    # Union emit + GET: si /api/ventas trae menos pax, no pisar voucher_ids del emit.
+    all_ids: list[int] = []
+    for vid in list(voucher_ids) + [info.id for info in infos]:
+        try:
+            value = int(vid)
+        except (TypeError, ValueError):
+            continue
+        if value > 0 and value not in all_ids:
+            all_ids.append(value)
+    resolved_infos = [
+        info_by_id.get(vid) or InterAssistVoucherInfo(id=vid) for vid in all_ids
+    ]
+    context = dict(sale.provider_context or {})
+    if venta_id:
+        context["venta_id"] = venta_id
+    context["voucher_ids"] = all_ids
+    context["vouchers"] = [
+        {
+            "id": info.id,
+            "first_name": info.first_name,
+            "last_name": info.last_name,
+            "document_number": info.document_number,
+            "email": info.email,
+        }
+        for info in resolved_infos
+    ]
+    sale.provider_context = context
+    flag_modified(sale, "provider_context")
+    session.add(sale)
+
+    passengers = session.exec(
+        select(Passenger).where(Passenger.sale_id == sale.id).order_by(Passenger.id)
+    ).all()
+    by_dni = {
+        (row.document_number or "").strip(): row
+        for row in passengers
+        if (row.document_number or "").strip()
+    }
+    first: Voucher | None = None
+    for info in resolved_infos:
+        passenger = by_dni.get((info.document_number or "").strip())
+        row = _save_inter_assist_voucher(
+            session,
+            sale,
+            info.id,
+            all_ids,
+            passenger_id=passenger.id if passenger is not None else None,
+            info=info,
+        )
+        if first is None:
+            first = row
+    return first
+
+
+def _load_inter_assist_voucher_infos(
+    venta_id: int | None,
+    voucher_ids: list[int],
+) -> list[InterAssistVoucherInfo]:
+    if venta_id:
+        try:
+            infos = get_inter_assist_venta_vouchers(venta_id)
+            if infos:
+                return infos
+        except InterAssistEmissionError:
+            logger.warning(
+                "inter_assist venta vouchers unavailable venta_id=%s",
+                venta_id,
+                exc_info=True,
+            )
+    return [InterAssistVoucherInfo(id=vid) for vid in voucher_ids if vid > 0]
+
+
+def _refresh_inter_assist_vouchers_from_provider(session: Session, sale: Sale) -> None:
+    """Relee vouchers de Inter Assist cuando el context quedó incompleto (1 de N)."""
+    context = sale.provider_context or {}
+    venta_id = None
+    try:
+        raw = context.get("venta_id")
+        if raw is not None:
+            venta_id = int(raw)
+    except (TypeError, ValueError):
+        venta_id = None
+    if not venta_id:
+        return
+    known = _inter_assist_voucher_ids(sale)
+    try:
+        _persist_inter_assist_issued_vouchers(session, sale, venta_id, known)
+        _commit(session)
+    except Exception:
+        logger.warning(
+            "inter_assist voucher refresh failed sale_id=%s venta_id=%s",
+            sale.id,
+            venta_id,
+            exc_info=True,
+        )
+
+
 def _save_inter_assist_voucher(
     session: Session,
     sale: Sale,
     voucher_id: int,
     all_ids: list[int],
+    *,
+    passenger_id: int | None = None,
+    info: InterAssistVoucherInfo | None = None,
 ) -> Voucher:
     external_id = str(voucher_id)
     existing = session.exec(
@@ -1623,16 +2034,33 @@ def _save_inter_assist_voucher(
             Voucher.external_id == external_id,
         )
     ).first()
+    provider_data = {
+        "voucher_ids": all_ids,
+        "venta_id": (sale.provider_context or {}).get("venta_id"),
+    }
+    if info is not None:
+        provider_data.update(
+            {
+                "first_name": info.first_name,
+                "last_name": info.last_name,
+                "document_number": info.document_number,
+                "email": info.email,
+            }
+        )
     if existing is not None:
+        if passenger_id is not None and existing.passenger_id is None:
+            existing.passenger_id = passenger_id
+        existing.provider_data = {**(existing.provider_data or {}), **provider_data}
+        session.add(existing)
         return existing
     voucher = Voucher(
         sale_id=sale.id or 0,
-        passenger_id=None,
+        passenger_id=passenger_id,
         external_id=external_id[:80],
         number=external_id[:80],
-        url=voucher_pdf_url(voucher_id)[:2000],
+        url=_public_inter_assist_voucher_url(sale.id or 0, voucher_id=voucher_id)[:2000],
         status=VoucherStatus.ISSUED.value,
-        provider_data={"voucher_ids": all_ids, "venta_id": (sale.provider_context or {}).get("venta_id")},
+        provider_data=provider_data,
     )
     session.add(voucher)
     session.flush()
@@ -1720,6 +2148,7 @@ def _replace_passengers_generic(session: Session, sale: Sale, data: PassengersCr
             provider_data["country_id"] = passenger.country_id.strip()
         if passenger.province_id:
             provider_data["province_id"] = passenger.province_id.strip()
+        gender = passenger.gender.strip().lower() if passenger.gender else None
         session.add(
             Passenger(
                 sale_id=sale.id or 0,
@@ -1729,6 +2158,7 @@ def _replace_passengers_generic(session: Session, sale: Sale, data: PassengersCr
                 birth_date=passenger.birth_date,
                 document_type=passenger.document_type,
                 document_number=passenger.document_number.strip(),
+                gender=gender,
                 email=str(passenger.email) if passenger.email else None,
                 phone=passenger.phone.strip() if passenger.phone else None,
                 country=passenger.country.strip() if passenger.country else None,
@@ -1921,6 +2351,307 @@ def _emergency_contact(sale: Sale) -> EmergencyContactResponse:
     )
 
 
+def _load_payway_catalog() -> PaywayCardsResult | None:
+    try:
+        return list_payway_cards()
+    except InterAssistEmissionError:
+        logger.warning("inter_assist payway cards unavailable", exc_info=True)
+        return None
+
+
+def _inter_assist_payment_methods(catalog: PaywayCardsResult | None) -> list[dict]:
+    methods: list[dict] = [
+        {"id": "mercadopago", "code": "MERCADOPAGO", "financing": []},
+    ]
+    if catalog is None:
+        return methods
+    methods.append(
+        {
+            "id": "payway",
+            "code": "PAYWAY",
+            "financing": [
+                {"id": str(dues), "dues": dues}
+                for dues in range(1, catalog.max_installments + 1)
+            ],
+            "cards": [
+                {"id": str(card.id), "name": card.name} for card in catalog.cards
+            ],
+            "max_installments": catalog.max_installments,
+        }
+    )
+    return methods
+
+
+def _ensure_inter_assist_payment_methods(session: Session, sale: Sale) -> None:
+    if sale.emission_status not in (
+        EmissionStatus.PASSENGERS_COMPLETE.value,
+        EmissionStatus.EMISSION_FAILED.value,
+    ):
+        return
+    raw = (sale.provider_context or {}).get("payment_methods") or []
+    if not isinstance(raw, list):
+        raw = []
+    ids = {str(item.get("id") or "") for item in raw if isinstance(item, dict)}
+    if "mercadopago" in ids and "payway" in ids:
+        return
+    catalog = _load_payway_catalog()
+    methods = _inter_assist_payment_methods(catalog)
+    if methods == raw:
+        return
+    context = dict(sale.provider_context or {})
+    context["payment_methods"] = methods
+    sale.provider_context = context
+    flag_modified(sale, "provider_context")
+    session.add(sale)
+    _commit(session)
+    session.refresh(sale)
+
+
+def _local_return_host(url: str) -> bool:
+    host = (urlparse(url).hostname or "").lower()
+    return host in {"localhost", "127.0.0.1", "::1"}
+
+
+def _inter_assist_gateway(payment_method_id: str) -> str:
+    method_id = (payment_method_id or "").strip().lower()
+    if method_id in {"mercadopago", "mp"}:
+        return PaymentProvider.MERCADOPAGO.value
+    if method_id == "payway":
+        return PaymentProvider.PAYWAY.value
+    raise SaleFlowError(400, "Elegí mercadopago o payway")
+
+
+def _payway_selection(
+    sale: Sale,
+    data: PaymentStart,
+    gateway: str,
+) -> tuple[int | None, int | None]:
+    if gateway != PaymentProvider.PAYWAY.value:
+        return None, None
+    card_id = _dues(data.credit_card_id)
+    installments = _dues(data.financing_id)
+    if card_id is None:
+        raise SaleFlowError(400, "Payway requiere credit_card_id")
+    if installments is None:
+        raise SaleFlowError(400, "Payway requiere financing_id con la cantidad de cuotas")
+    payway = _stored_payway_method(sale)
+    cards = payway.get("cards") if isinstance(payway, dict) else None
+    known = set()
+    if isinstance(cards, list):
+        for card in cards:
+            if isinstance(card, dict):
+                parsed = _dues(card.get("id"))
+                if parsed is not None:
+                    known.add(parsed)
+    if known and card_id not in known:
+        raise SaleFlowError(400, "Esa tarjeta no está habilitada en Payway")
+    max_installments = _dues(payway.get("max_installments")) if isinstance(payway, dict) else None
+    if max_installments is None:
+        max_installments = 6
+    if installments < 1 or installments > max_installments:
+        raise SaleFlowError(
+            400,
+            f"Las cuotas de Payway tienen que estar entre 1 y {max_installments}",
+        )
+    return card_id, installments
+
+
+def _stored_payway_method(sale: Sale) -> dict:
+    methods = (sale.provider_context or {}).get("payment_methods") or []
+    if isinstance(methods, list):
+        for method in methods:
+            if isinstance(method, dict) and str(method.get("id") or "") == "payway":
+                return method
+    return {}
+
+
+def _reusable_inter_assist_checkout(
+    payment: Payment,
+    gateway: str,
+    card_id: int | None,
+    installments: int | None,
+    data: PaymentStart,
+) -> bool:
+    if payment.status != PaymentStatus.PENDING.value or not payment.checkout_url:
+        return False
+    if payment.provider != gateway:
+        return False
+    stored = payment.provider_data or {}
+    if stored.get("return_url_ok") != data.return_url_ok.strip():
+        return False
+    if stored.get("return_url_error") != data.return_url_error.strip():
+        return False
+    if gateway == PaymentProvider.MERCADOPAGO.value:
+        return stored.get("return_url_pending") == data.return_url_pending.strip()
+    return stored.get("credit_card_id") == card_id and stored.get("installments") == installments
+
+
+def _reject_pending_payments(session: Session, sale_id: int) -> None:
+    rows = session.exec(
+        select(Payment).where(
+            Payment.sale_id == sale_id,
+            Payment.status == PaymentStatus.PENDING.value,
+        )
+    ).all()
+    now = datetime.utcnow()
+    for row in rows:
+        row.status = PaymentStatus.REJECTED.value
+        row.updated_at = now
+        session.add(row)
+
+
+def _inter_assist_clientes(
+    session: Session,
+    sale: Sale,
+) -> tuple[int, int, list[InterAssistClientDraft]]:
+    passengers = session.exec(
+        select(Passenger).where(Passenger.sale_id == sale.id).order_by(Passenger.id)
+    ).all()
+    if not passengers:
+        raise SaleFlowError(400, "La venta no tiene pasajeros")
+    if not any(_real_passenger_email(row.email) for row in passengers):
+        raise SaleFlowError(
+            400,
+            "Al menos un viajero tiene que tener un email real para abrir el checkout",
+        )
+    plan_raw = (sale.provider_context or {}).get("plan_id") or sale.external_plan_id
+    try:
+        plan_id = int(str(plan_raw).strip())
+    except ValueError as exc:
+        raise SaleFlowError(400, "El plan de Inter Assist no es válido") from exc
+    # Doc Inter §5.4 / §7.5: 0 = sin promo. El id sale del snapshot al abrir la venta.
+    promocion_id = int((sale.provider_context or {}).get("promocion_id") or 0)
+    clientes = [
+        InterAssistClientDraft(
+            first_name=row.first_name,
+            last_name=row.last_name,
+            birth_date=row.birth_date,
+            document_number=row.document_number,
+            email=row.email,
+            phone=row.phone,
+        )
+        for row in passengers
+    ]
+    return plan_id, promocion_id, clientes
+
+
+def _real_passenger_email(email: str | None) -> bool:
+    value = (email or "").strip().lower()
+    return bool(value) and "@" in value and value != "correo@correo.com"
+
+
+def _inter_assist_notification_url(sale_id: int) -> str | None:
+    base = get_settings().public_api_base_url.strip().rstrip("/")
+    if not base.lower().startswith(("https://", "http://")):
+        return None
+    return f"{base}/v1/sales/{sale_id}/interassist/payment-notification"
+
+
+def _latest_payment(session: Session, sale_id: int) -> Payment | None:
+    return session.exec(
+        select(Payment).where(Payment.sale_id == sale_id).order_by(Payment.id.desc())
+    ).first()
+
+
+def _confirm_inter_assist_checkout(
+    session: Session,
+    sale: Sale,
+    payment: Payment,
+    *,
+    from_notification: bool,
+) -> PaymentConfirmResponse:
+    order_uuid = (payment.external_id or "").strip()
+    if not order_uuid:
+        raise SaleFlowError(400, "Esta venta no tiene orden de checkout")
+    try:
+        order = get_inter_assist_checkout(order_uuid)
+    except InterAssistEmissionError as exc:
+        _add_attempt(
+            session,
+            sale,
+            step="confirm_payment",
+            success=False,
+            http_status=exc.http_status or exc.status_code,
+            request_payload=exc.request_body or {"order_uuid": order_uuid},
+            response_payload=exc.response_body or {"detail": exc.detail},
+            error_message=exc.detail,
+        )
+        _commit(session)
+        status = exc.status_code if exc.status_code < 500 else 502
+        raise SaleFlowError(status, exc.detail) from exc
+
+    _add_attempt(
+        session,
+        sale,
+        step="confirm_payment",
+        success=True,
+        http_status=order.status_code,
+        request_payload={"order_uuid": order_uuid},
+        response_payload=order.response_body,
+        error_message=None,
+    )
+    if order.status == "approved" and order.venta_id and order.voucher_ids:
+        return _issue_inter_assist_checkout(session, sale, payment, order)
+
+    if order.status in {"rejected", "cancelled"}:
+        payment.status = PaymentStatus.REJECTED.value
+        payment.updated_at = datetime.utcnow()
+        sale.payment_status = SalePaymentStatus.REJECTED.value
+        sale.updated_at = datetime.utcnow()
+        session.add(payment)
+        session.add(sale)
+        _commit(session)
+        session.refresh(sale)
+        if from_notification:
+            return _confirm_response(sale, False, None, company_slug=_INTER_ASSIST_SLUG)
+        raise SaleFlowError(409, "El pago de esta venta fue rechazado")
+
+    payment.status = PaymentStatus.PENDING.value
+    payment.updated_at = datetime.utcnow()
+    sale.payment_status = SalePaymentStatus.PENDING.value
+    sale.updated_at = datetime.utcnow()
+    session.add(payment)
+    session.add(sale)
+    _commit(session)
+    session.refresh(sale)
+    return _confirm_response(sale, False, None, company_slug=_INTER_ASSIST_SLUG)
+
+
+def _issue_inter_assist_checkout(
+    session: Session,
+    sale: Sale,
+    payment: Payment,
+    order: InterAssistCheckoutResult,
+) -> PaymentConfirmResponse:
+    context = dict(sale.provider_context or {})
+    context["venta_id"] = order.venta_id
+    context["voucher_ids"] = order.voucher_ids
+    context["checkout_gateway"] = order.gateway or payment.provider
+    sale.provider_context = context
+    flag_modified(sale, "provider_context")
+    sale.emission_status = EmissionStatus.ISSUED.value
+    sale.payment_status = SalePaymentStatus.APPROVED.value
+    sale.updated_at = datetime.utcnow()
+    payment.status = PaymentStatus.APPROVED.value
+    payment.updated_at = datetime.utcnow()
+    if order.amount is not None:
+        payment.amount = order.amount
+    if order.currency:
+        payment.currency = order.currency[:3]
+    if order.exchange_rate is not None:
+        provider_data = dict(payment.provider_data or {})
+        provider_data["exchange_rate"] = str(order.exchange_rate)
+        payment.provider_data = provider_data
+    session.add(payment)
+    session.add(sale)
+    voucher = _persist_inter_assist_issued_vouchers(
+        session, sale, order.venta_id, order.voucher_ids
+    )
+    _commit(session)
+    session.refresh(sale)
+    return _confirm_response(sale, True, voucher, company_slug=_INTER_ASSIST_SLUG)
+
+
 def _payment_method_options(sale: Sale) -> list[PaymentMethodOption]:
     raw = (sale.provider_context or {}).get("payment_methods") or []
     if not isinstance(raw, list):
@@ -1938,11 +2669,28 @@ def _payment_method_options(sale: Sale) -> list[PaymentMethodOption]:
                 id=method_id[:80],
                 code=code[:40],
                 name=PAYMENT_METHOD_NAMES.get(code, code)[:80],
-                requires_financing=code in FINANCING_REQUIRED_CODES,
+                requires_financing=code in FINANCING_REQUIRED_CODES or code == "PAYWAY",
                 financing=_financing_options(method.get("financing")),
+                cards=_card_options(method.get("cards")),
+                max_installments=_dues(method.get("max_installments")),
             )
         )
     return options
+
+
+def _card_options(raw: object) -> list[PaywayCardOption]:
+    if not isinstance(raw, list):
+        return []
+    cards: list[PaywayCardOption] = []
+    for item in raw:
+        if not isinstance(item, dict):
+            continue
+        card_id = str(item.get("id") or "").strip()
+        name = str(item.get("name") or item.get("nombre") or "").strip()
+        if not card_id or not name:
+            continue
+        cards.append(PaywayCardOption(id=card_id[:80], name=name[:80]))
+    return cards
 
 
 def _financing_options(raw: object) -> list[FinancingOption]:
@@ -1995,13 +2743,34 @@ def _pending_payment(session: Session, sale_id: int) -> Payment | None:
     ).first()
 
 
-def _payment_response(sale: Sale, checkout_url: str | None, *, created: bool) -> PaymentResponse:
+def _payment_exchange_rate(payment: Payment) -> Decimal | None:
+    raw = (payment.provider_data or {}).get("exchange_rate")
+    if raw is None:
+        return None
+    try:
+        return Decimal(str(raw))
+    except Exception:
+        return None
+
+
+def _payment_response(
+    sale: Sale,
+    checkout_url: str | None,
+    *,
+    created: bool,
+    amount: Decimal | None = None,
+    currency: str | None = None,
+    exchange_rate: Decimal | None = None,
+) -> PaymentResponse:
     return PaymentResponse(
         sale_id=sale.id or 0,
         emission_status=sale.emission_status,
         payment_status=sale.payment_status,
         checkout_url=checkout_url,
         created=created,
+        amount=amount,
+        currency=currency,
+        exchange_rate=exchange_rate,
     )
 
 
@@ -2040,8 +2809,15 @@ def _confirm_response(
     company_slug: str | None = None,
 ) -> PaymentConfirmResponse:
     voucher_url = None
-    if voucher is not None:
-        if company_slug in {_INTER_ASSIST_SLUG, _UNIVERSAL_SLUG}:
+    vouchers: list[SaleVoucherItem] = []
+    if company_slug == _INTER_ASSIST_SLUG:
+        vouchers = _inter_assist_voucher_items(sale)
+        if vouchers:
+            voucher_url = vouchers[0].url
+        elif voucher is not None:
+            voucher_url = _public_inter_assist_voucher_url(sale.id or 0)
+    elif voucher is not None:
+        if company_slug == _UNIVERSAL_SLUG:
             voucher_url = _public_voucher_pdf_url(sale.id or 0)
         else:
             voucher_url = voucher.url
@@ -2050,8 +2826,13 @@ def _confirm_response(
         emission_status=sale.emission_status,
         payment_status=sale.payment_status,
         payment_received=paid,
-        voucher_number=voucher.number if voucher else None,
+        voucher_number=(
+            vouchers[0].number
+            if vouchers
+            else (voucher.number if voucher else None)
+        ),
         voucher_url=voucher_url,
+        vouchers=vouchers,
     )
 
 
@@ -2144,6 +2925,7 @@ def _passenger_response(row: Passenger) -> PassengerResponse:
         birth_date=row.birth_date,
         document_type=row.document_type,
         document_number=row.document_number,
+        gender=row.gender,
         email=row.email,
         phone=row.phone,
         country=row.country,

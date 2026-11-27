@@ -9,3 +9,4 @@ docs/terraapi.pdf
 .DS_Store
 **/.DS_Store
 request/interassist-auth-debug.http
+docs/credencialesdevmp.md

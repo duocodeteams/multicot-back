@@ -119,6 +119,23 @@ class Settings(BaseSettings):
     # {public_api_base_url}/v1/sales/{id}/omint/payment-notification.
     # Con tarjeta no hay aviso. Vacío: no se puede abrir el checkout.
     public_api_base_url: str = ""
+    # Origen del portal, sin barra final. Mercado Pago acepta localhost.
+    # Payway (Decidir) no: hace falta un https público, por ejemplo un túnel.
+    portal_base_url: str = "https://biantravel.com"
+
+    # Nave (Galicia) Checkout — sandbox por defecto
+    nave_client_id: str = ""
+    nave_client_secret: str = ""
+    nave_audience: str = "https://api.ranty.io/integrations"
+    nave_pos_id: str = "f71ba756-1d80-4ab3-9f43-5dc247fd6c4a"
+    nave_auth_url: str = (
+        "https://homoservices.apinaranja.com/security-ms/api/security/auth0/b2b/m2ms"
+    )
+    nave_api_base_url: str = "https://api-sandbox.ranty.io/integrations"
+    # Retorno del pax tras pagar (frontend).
+    nave_callback_url: str = ""
+    # URL pública del webhook: {PUBLIC}/v1/nave/webhooks
+    nave_notification_url: str = ""
 
 
 def get_cardinal_destino_ids(settings: Settings) -> dict[int, int]:

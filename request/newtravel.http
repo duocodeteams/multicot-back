@@ -1,0 +1,176 @@
+### New Travel — API externa (demo) + flujo app
+@base_url = https://cacao.ilstechnik.com/api/v1
+@user = biant_WS_DEMO
+@password = F1maCsvj
+@token = PEGAR_TOKEN_ACA
+@language = spa
+
+@appBaseUrl = http://localhost:8000
+@appToken = PEGAR_JWT_ACA
+@saleId = 1
+
+### 1) Obtener token (copiar data.token a @token)
+POST {{base_url}}/auth/get_token
+Content-Type: application/json
+Language: {{language}}
+
+{
+  "user": "{{user}}",
+  "password": "{{password}}"
+}
+
+### 2) Tipos de documento (API New Travel)
+GET {{base_url}}/orders/type_documents
+Token: {{token}}
+Language: {{language}}
+
+### 3) País AR (prefijo telefónico)
+GET {{base_url}}/generals/country/AR
+Token: {{token}}
+Language: {{language}}
+
+### 4) Lista de países
+GET {{base_url}}/generals/countries
+Token: {{token}}
+Language: {{language}}
+
+### 5) Reportar pago externo (demo — hoy falla 3951 en esta agencia)
+# Reemplazar @orderCode por el voucherCode de una emisión waitForPayment
+@orderCode = CCD-AIJHGB
+POST {{base_url}}/payments/report
+Token: {{token}}
+Language: {{language}}
+Content-Type: application/json
+
+{
+  "code": "{{orderCode}}",
+  "paymentCode": "DEMO-001",
+  "details": "Pago de prueba demo"
+}
+
+### 6) Generar link de pago (sí funciona en demo)
+POST {{base_url}}/payments/paymentLink
+Token: {{token}}
+Language: {{language}}
+Content-Type: application/json
+
+{
+  "code": "{{orderCode}}"
+}
+
+### 7) Consultar emisión / paid
+GET {{base_url}}/orders/order/{{orderCode}}
+Token: {{token}}
+Language: {{language}}
+
+### App — cotizar (incluye New Travel)
+POST {{appBaseUrl}}/v1/quotes
+Authorization: Bearer {{appToken}}
+Content-Type: application/json
+Accept: application/json
+
+{
+  "departure_date": "2026-06-20",
+  "return_date": "2026-06-27",
+  "ages": [35],
+  "origin": "AR",
+  "destination_id": 3,
+  "trip_type": "unico_viaje"
+}
+
+### App — catálogo documentos New Travel
+GET {{appBaseUrl}}/v1/sales/new_travel/document-types
+Authorization: Bearer {{appToken}}
+Accept: application/json
+
+### App — países New Travel
+GET {{appBaseUrl}}/v1/sales/new_travel/countries
+Authorization: Bearer {{appToken}}
+Accept: application/json
+
+### App — provincias New Travel (AR = Georef; otros = [])
+GET {{appBaseUrl}}/v1/sales/new_travel/countries/AR/provinces
+Authorization: Bearer {{appToken}}
+Accept: application/json
+
+### App — abrir venta New Travel
+POST {{appBaseUrl}}/v1/sales
+Authorization: Bearer {{appToken}}
+Content-Type: application/json
+Accept: application/json
+
+{
+  "company": "new_travel",
+  "quote_id": "2329",
+  "quote": {
+    "departure_date": "2026-06-20",
+    "return_date": "2026-06-27",
+    "ages": [35],
+    "origin": "AR",
+    "destination_id": 3,
+    "trip_type": "unico_viaje",
+    "amount": "120.50",
+    "currency": "USD",
+    "plan_name": "PLAN DEMO NTA",
+    "markup": "0"
+  }
+}
+
+### App — pasajeros (email/phone en todos)
+POST {{appBaseUrl}}/v1/sales/{{saleId}}/passengers
+Authorization: Bearer {{appToken}}
+Content-Type: application/json
+Accept: application/json
+
+{
+  "receive_promotions": false,
+  "emergency_contact": {
+    "first_name": "Luis",
+    "last_name": "Perez",
+    "phone": "+5491100000001",
+    "email": "luis.perez@example.com"
+  },
+  "passengers": [
+    {
+      "is_holder": true,
+      "first_name": "Ana",
+      "last_name": "Perez",
+      "birth_date": "1991-04-22",
+      "document_type": "passport",
+      "document_number": "AAB123456",
+      "gender": "f",
+      "email": "ana.perez@example.com",
+      "phone": "+5491100000000",
+      "country_id": "AR",
+      "province_id": "BA",
+      "country": "Argentina",
+      "province": "Buenos Aires",
+      "street": "Av. Ejemplo",
+      "street_number": "123",
+      "city": "Buenos Aires"
+    }
+  ]
+}
+
+### App — abrir pago (checkout New Travel)
+POST {{appBaseUrl}}/v1/sales/{{saleId}}/payment
+Authorization: Bearer {{appToken}}
+Content-Type: application/json
+Accept: application/json
+
+{
+  "payment_method_id": "new_travel",
+  "return_url_ok": "https://panel.example/ok",
+  "return_url_error": "https://panel.example/error",
+  "return_url_pending": "https://panel.example/pending"
+}
+
+### App — confirmar pago / voucher
+POST {{appBaseUrl}}/v1/sales/{{saleId}}/payment/confirm
+Authorization: Bearer {{appToken}}
+Accept: application/json
+
+### App — detalle venta
+GET {{appBaseUrl}}/v1/sales/{{saleId}}
+Authorization: Bearer {{appToken}}
+Accept: application/json

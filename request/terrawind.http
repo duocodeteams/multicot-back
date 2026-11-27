@@ -1,0 +1,116 @@
+@appBaseUrl = http://localhost:8000
+@appToken = REPLACE_ME
+@saleId = 1
+
+### App — cotizar (incluye Terrawind)
+POST {{appBaseUrl}}/v1/quotes
+Authorization: Bearer {{appToken}}
+Content-Type: application/json
+Accept: application/json
+
+{
+  "departure_date": "2026-12-01",
+  "return_date": "2026-12-12",
+  "ages": [30],
+  "origin": "AR",
+  "destination_id": 2,
+  "trip_type": "unico_viaje"
+}
+
+### App — abrir venta Terrawind
+POST {{appBaseUrl}}/v1/sales
+Authorization: Bearer {{appToken}}
+Content-Type: application/json
+Accept: application/json
+
+{
+  "company": "terrawind",
+  "quote_id": "10432",
+  "quote": {
+    "departure_date": "2026-12-01",
+    "return_date": "2026-12-12",
+    "ages": [30],
+    "origin": "AR",
+    "destination_id": 2,
+    "trip_type": "unico_viaje",
+    "amount": "177.00",
+    "currency": "ARS",
+    "plan_name": "TW PLAN DEMO",
+    "markup": "0",
+    "setw_country_id": "9999"
+  }
+}
+
+### App — países SETW
+GET {{appBaseUrl}}/v1/sales/terrawind/countries
+Authorization: Bearer {{appToken}}
+Accept: application/json
+
+### App — pasajeros (gender obligatorio)
+POST {{appBaseUrl}}/v1/sales/{{saleId}}/passengers
+Authorization: Bearer {{appToken}}
+Content-Type: application/json
+Accept: application/json
+
+{
+  "receive_promotions": false,
+  "emergency_contact": {
+    "first_name": "Luis",
+    "last_name": "Perez",
+    "phone": "+5491100000001"
+  },
+  "passengers": [
+    {
+      "is_holder": true,
+      "first_name": "Ana",
+      "last_name": "Perez",
+      "birth_date": "1991-04-22",
+      "document_type": "dni",
+      "document_number": "30111222",
+      "gender": "f",
+      "email": "ana.perez@example.com",
+      "phone": "+5491100000000",
+      "country_id": "AR",
+      "province_id": "BA",
+      "country": "Argentina",
+      "province": "Buenos Aires",
+      "street": "Av. Ejemplo",
+      "street_number": "123",
+      "city": "Buenos Aires"
+    }
+  ]
+}
+
+### App — abrir pago Nave
+POST {{appBaseUrl}}/v1/sales/{{saleId}}/payment
+Authorization: Bearer {{appToken}}
+Content-Type: application/json
+Accept: application/json
+
+{
+  "payment_method_id": "nave",
+  "return_url_ok": "https://panel.example/ok",
+  "return_url_error": "https://panel.example/error",
+  "return_url_pending": "https://panel.example/pending"
+}
+
+### App — confirmar pago / emitir
+POST {{appBaseUrl}}/v1/sales/{{saleId}}/payment/confirm
+Authorization: Bearer {{appToken}}
+Accept: application/json
+
+### App — detalle venta
+GET {{appBaseUrl}}/v1/sales/{{saleId}}
+Authorization: Bearer {{appToken}}
+Accept: application/json
+
+### Nave — webhook (simulado)
+POST {{appBaseUrl}}/v1/nave/webhooks
+Content-Type: application/json
+Accept: application/json
+
+{
+  "payment_id": "nave-payment-id",
+  "payment_check_url": "api.ranty.io/integrations/payments/nave-payment-id",
+  "external_payment_id": "tw1-abcdefghijkl"
+}

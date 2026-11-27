@@ -29,13 +29,14 @@ _ANNUAL_INCLUSIVE_DAYS = 365
 # destination_id (cotizador) -> idTerritory de New Travel
 # 1=Nacional, 2=Latinoamerica, 3=Europa, 4=Resto del mundo, 5=Norteamerica
 # Europa se mapea a Mundial: /orders/quote con territorio 2 (Europa) responde data=[].
-_DESTINATION_TO_TERRITORY: dict[int, str] = {
+DESTINATION_TO_TERRITORY: dict[int, str] = {
     DESTINO_ID_NACIONAL: "9",  # Local
     DESTINO_ID_LATINOAMERICA: "1",  # Mundial
     DESTINO_ID_EUROPA: "1",  # Mundial (territorio Europa no cotiza en esta cuenta)
     DESTINO_ID_RESTO_MUNDO: "1",  # Mundial
     DESTINO_ID_NORTEAMERICA: "1",  # Mundial
 }
+_DESTINATION_TO_TERRITORY = DESTINATION_TO_TERRITORY
 
 
 class NewTravelQuoteProvider:
@@ -48,7 +49,7 @@ class NewTravelQuoteProvider:
     def get_quotes(self, request: QuoteRequest) -> list[QuotePlan]:
         settings = self._settings
         if not settings.new_travel_user or not settings.new_travel_password:
-            logger.debug(
+            logger.warning(
                 "NewTravel: faltan NEW_TRAVEL_USER/NEW_TRAVEL_PASSWORD configurados"
             )
             return []
@@ -56,13 +57,13 @@ class NewTravelQuoteProvider:
         base_url = settings.new_travel_base_url.rstrip("/")
         territory_id = _DESTINATION_TO_TERRITORY.get(request.destination_id)
         if not territory_id:
-            logger.debug(
+            logger.warning(
                 "NewTravel: destination_id=%s sin mapeo de territorio",
                 request.destination_id,
             )
             return []
 
-        logger.debug(
+        logger.info(
             "NewTravel: quote start origin=%s destination_id=%s territory_id=%s "
             "trip_type=%s days_range=%s %s->%s ages=%s",
             request.origin,
@@ -79,7 +80,7 @@ class NewTravelQuoteProvider:
             try:
                 token = self._get_token(client, base_url)
                 if not token:
-                    logger.debug("NewTravel: sin token; no se cotiza")
+                    logger.warning("NewTravel: sin token; no se cotiza")
                     return []
             except httpx.HTTPError:
                 logger.exception("NewTravel: error HTTP obteniendo token")
@@ -103,7 +104,7 @@ class NewTravelQuoteProvider:
                 logger.exception("NewTravel: error inesperado en /orders/quote")
                 return []
             if not quoted_plans:
-                logger.debug(
+                logger.info(
                     "NewTravel: /orders/quote devolvio 0 planes origin=%s destination_id=%s territory_id=%s %s->%s ages=%s",
                     request.origin,
                     request.destination_id,
@@ -113,6 +114,19 @@ class NewTravelQuoteProvider:
                     request.ages,
                 )
                 return []
+
+            raw_ids = [
+                str((row or {}).get("idPlan") or "")
+                for row in quoted_plans
+                if isinstance(row, dict)
+            ]
+            logger.info(
+                "NewTravel: respuesta /orders/quote ids=%s count=%s",
+                raw_ids,
+                len(raw_ids),
+            )
+            # Visibilidad en consola del server (equivalente a console.log).
+            print(f"[NewTravel] /orders/quote ids={raw_ids} count={len(raw_ids)}", flush=True)
 
             plans: list[QuotePlan] = []
             for quoted_plan in quoted_plans:
@@ -138,17 +152,23 @@ class NewTravelQuoteProvider:
                 if plan:
                     plans.append(plan)
                 else:
-                    logger.debug(
+                    logger.info(
                         "NewTravel: quoted_plan descartado idPlan=%s name=%s total=%s",
                         (quoted_plan or {}).get("idPlan"),
                         (quoted_plan or {}).get("name"),
                         (quoted_plan or {}).get("total"),
                     )
 
-            logger.debug(
-                "NewTravel: quote end ok plans=%s/%s",
+            kept_ids = [p.plan_id for p in plans]
+            logger.info(
+                "NewTravel: quote end ok plans=%s/%s ids=%s",
                 len(plans),
                 len(quoted_plans),
+                kept_ids,
+            )
+            print(
+                f"[NewTravel] quote parseados ids={kept_ids} ({len(plans)}/{len(quoted_plans)})",
+                flush=True,
             )
             return plans
 
@@ -208,7 +228,8 @@ class NewTravelQuoteProvider:
                     trip_days,
                     _ANNUAL_INCLUSIVE_DAYS,
                 )
-        headers = {"token": token, "Content-Type": "application/json"}
+        # Solo un header de token: mandar Token + token juntos hace 401 (1001).
+        headers = {"token": token, "Content-Type": "application/json", "Language": "spa"}
         t0 = time.monotonic()
         response = client.post(f"{base_url}/orders/quote", headers=headers, json=body)
         elapsed_ms = int((time.monotonic() - t0) * 1000)
@@ -221,7 +242,7 @@ class NewTravelQuoteProvider:
                 _preview(body),
             )
         else:
-            logger.debug(
+            logger.info(
                 "NewTravel: /orders/quote HTTP %s (%sms) request=%s",
                 response.status_code,
                 elapsed_ms,
@@ -229,9 +250,26 @@ class NewTravelQuoteProvider:
             )
         response.raise_for_status()
         data = response.json()
-        plans = data.get("data") or []
+        status = str((data or {}).get("status") or "").upper() if isinstance(data, dict) else ""
+        if status and status != "OK":
+            err = (data.get("error") if isinstance(data, dict) else None) or {}
+            logger.warning(
+                "NewTravel: /orders/quote status=%s code=%s message=%s field=%s request=%s",
+                status,
+                err.get("code") if isinstance(err, dict) else None,
+                err.get("message") if isinstance(err, dict) else None,
+                err.get("field") if isinstance(err, dict) else None,
+                _preview(body),
+            )
+            print(
+                f"[NewTravel] /orders/quote ERROR status={status} error={err} request={body}",
+                flush=True,
+            )
+            return []
+
+        plans = data.get("data") or [] if isinstance(data, dict) else []
         if not isinstance(plans, list):
-            logger.debug(
+            logger.warning(
                 "NewTravel: /orders/quote formato inesperado type(data)=%s keys=%s data_preview=%s",
                 type(data).__name__,
                 sorted(list(data.keys())) if isinstance(data, dict) else None,
@@ -239,10 +277,10 @@ class NewTravelQuoteProvider:
             )
             return []
 
-        logger.debug("NewTravel: /orders/quote planes=%s", len(plans))
         if len(plans) == 0:
-            logger.debug(
-                "NewTravel: /orders/quote 200 pero sin planes data_preview=%s",
+            logger.info(
+                "NewTravel: /orders/quote 200 OK pero sin planes request=%s data_preview=%s",
+                _preview(body),
                 _preview(data),
             )
         return plans

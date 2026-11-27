@@ -33,7 +33,10 @@ class SalePaymentStatus(str, enum.Enum):
 class PaymentProvider(str, enum.Enum):
     OMINT_GATEWAY = "omint_gateway"
     MERCADOPAGO = "mercadopago"
+    PAYWAY = "payway"
     SIMULATED = "simulated"
+    NAVE = "nave"
+    NEW_TRAVEL_GATEWAY = "new_travel_gateway"
 
 
 class PaymentStatus(str, enum.Enum):
