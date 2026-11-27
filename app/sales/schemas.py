@@ -30,18 +30,38 @@ class InterAssistQuoteSnapshot(BaseModel):
     base_amount: Decimal | None = None
 
 
-class SaleCreate(BaseModel):
-    """Omint: `quote_id` = `quotationId|productId`. Inter Assist: `quote_id` = plan_id + `quote`."""
+class UniversalQuoteSnapshot(BaseModel):
+    """Viaje ya cotizado. `quote_id` de la venta es el IdLeadOut."""
 
-    company: str = Field(description="Slug de la compañía: omint o inter_assist.")
+    departure_date: date
+    return_date: date | None = None
+    ages: list[int] = Field(min_length=1, max_length=10)
+    origin: str = Field(default="AR", min_length=2, max_length=16)
+    destination_id: int
+    trip_type: TripType
+    days_range: int | None = None
+    plan_name: str = Field(min_length=1, max_length=200)
+    product_name: str | None = Field(default=None, max_length=200)
+    product_id: str | None = Field(default=None, max_length=80)
+    amount_usd: Decimal = Field(gt=0)
+    amount_local: Decimal | None = Field(default=None, gt=0)
+    markup: Decimal = Field(default=Decimal("0"))
+
+
+class SaleCreate(BaseModel):
+    """Omint: `quote_id` = `quotationId|productId`. Inter Assist y Universal mandan `quote`."""
+
+    company: str = Field(description="Slug de la compañía: omint, inter_assist o universal.")
     quote_id: str = Field(min_length=1)
-    quote: InterAssistQuoteSnapshot | None = None
+    quote: InterAssistQuoteSnapshot | UniversalQuoteSnapshot | None = None
 
     @model_validator(mode="after")
-    def inter_assist_requires_quote(self) -> "SaleCreate":
+    def company_requires_its_snapshot(self) -> "SaleCreate":
         slug = self.company.strip().lower().replace(" ", "_")
-        if slug in {"inter_assist", "interassist"} and self.quote is None:
+        if slug in {"inter_assist", "interassist"} and not isinstance(self.quote, InterAssistQuoteSnapshot):
             raise ValueError("Inter Assist requiere el snapshot del viaje en `quote`")
+        if slug == "universal" and not isinstance(self.quote, UniversalQuoteSnapshot):
+            raise ValueError("Universal requiere el snapshot del viaje en `quote`")
         return self
 
 

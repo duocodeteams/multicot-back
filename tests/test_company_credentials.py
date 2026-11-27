@@ -18,6 +18,7 @@ from app.credentials.service import (
     delete_agency_credential,
     list_agency_credentials,
     resolve_cardinal_credentials,
+    resolve_universal_organization,
     upsert_agency_credential,
 )
 from app.models.agency import Agency, BillingFrequency, PaymentMethod, TaxCondition
@@ -69,11 +70,14 @@ class AgencyCredentialTest(TestCase):
         settings.password_encryption_key = Fernet.generate_key().decode()
         settings.cardinal_agente_emisor_guid = ADMIN_GUID
         settings.cardinal_agente_emisor_secreto = "admin-secret"
+        self._previous_org = settings.universal_organizacion_emisora
+        settings.universal_organizacion_emisora = "1-SERVER"
 
     def tearDown(self) -> None:
         settings.password_encryption_key = self._previous_key
         settings.cardinal_agente_emisor_guid = self._previous_guid
         settings.cardinal_agente_emisor_secreto = self._previous_secret
+        settings.universal_organizacion_emisora = self._previous_org
         self.session.close()
 
     def test_save_returns_plaintext_and_falls_back_after_delete(self) -> None:
@@ -88,11 +92,15 @@ class AgencyCredentialTest(TestCase):
         self.assertEqual(saved.credentials["agente_emisor_secreto"], "secreto-agencia")
 
         listed = list_agency_credentials(self.session, self.agency.id)
-        self.assertEqual(len(listed), 1)
-        self.assertEqual(listed[0].credentials["agente_emisor_guid"], AGENCY_GUID)
+        cardinal = next(item for item in listed if item.company_slug == "cardinal")
+        self.assertEqual(cardinal.credentials["agente_emisor_guid"], AGENCY_GUID)
 
         delete_agency_credential(self.session, self.agency.id, "cardinal")
-        after = list_agency_credentials(self.session, self.agency.id)[0]
+        after = next(
+            item
+            for item in list_agency_credentials(self.session, self.agency.id)
+            if item.company_slug == "cardinal"
+        )
         self.assertTrue(after.uses_default)
         self.assertIsNone(after.credentials)
 
@@ -147,6 +155,37 @@ class AgencyCredentialTest(TestCase):
         other_user = self._user("sur@test.com", UserRole.AGENCY, other.id)
         resolved = resolve_cardinal_credentials(self.session, other_user)
         self.assertEqual(resolved.agente_emisor_guid, ADMIN_GUID)
+
+    def test_agency_and_its_seller_use_the_universal_row_id(self) -> None:
+        self.session.add(Company(slug="universal", name="Universal", active=True))
+        self.session.commit()
+        upsert_agency_credential(
+            self.session,
+            self.agency.id,
+            "universal",
+            {"organizacion_emisora": "1-AGENCIA"},
+        )
+        agency_user = self._user("universal-agencia@test.com", UserRole.AGENCY, self.agency.id)
+        seller_user = self._user("universal-vendedor@test.com", UserRole.SELLER, None)
+        self.session.add(
+            Seller(
+                user_id=seller_user.id,
+                agency_id=self.agency.id,
+                first_name="Juan",
+                last_name="Perez",
+                address="Calle 2",
+                nationality="AR",
+                birth_date=date(1990, 1, 1),
+                comments="",
+            )
+        )
+        self.session.commit()
+
+        self.assertEqual(resolve_universal_organization(self.session, agency_user), "1-AGENCIA")
+        self.assertEqual(resolve_universal_organization(self.session, seller_user), "1-AGENCIA")
+
+        delete_agency_credential(self.session, self.agency.id, "universal")
+        self.assertEqual(resolve_universal_organization(self.session, seller_user), "1-SERVER")
 
     def test_omint_is_not_configurable(self) -> None:
         with self.assertRaises(CredentialServiceError) as raised:

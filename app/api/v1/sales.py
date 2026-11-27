@@ -20,10 +20,12 @@ from app.sales.schemas import (
     PaymentResponse,
     PaymentSimulate,
     PaymentStart,
+    InterAssistQuoteSnapshot,
     SaleCreate,
     SaleDetailResponse,
     SaleListResponse,
     SaleResponse,
+    UniversalQuoteSnapshot,
 )
 from app.sales.service import (
     SaleFlowError,
@@ -41,8 +43,14 @@ from app.sales.service import (
     open_inter_assist_sale,
     open_omint_sale,
     sale_to_response,
+    confirm_universal_payment,
+    download_universal_voucher_pdf,
+    open_universal_sale,
     set_inter_assist_passengers,
     set_omint_passengers,
+    set_universal_passengers,
+    simulate_universal_payment,
+    start_universal_payment,
     simulate_inter_assist_payment,
     start_inter_assist_payment,
     start_omint_payment,
@@ -54,6 +62,7 @@ router = APIRouter()
 
 _OMINT = "omint"
 _INTER_ASSIST = "inter_assist"
+_UNIVERSAL = "universal"
 
 
 def _company_slug(name: str) -> str:
@@ -77,7 +86,7 @@ def create_sale(
     session: Annotated[Session, Depends(get_session)],
     current_user: Annotated[User, Depends(get_current_user)],
 ) -> SaleResponse:
-    """Abre una venta. Omint asigna producto; Inter Assist congela el snapshot local."""
+    """Abre una venta. Omint asigna producto; Inter Assist y Universal congelan el viaje."""
     slug = _company_slug(data.company)
     try:
         if slug == _OMINT:
@@ -89,7 +98,7 @@ def create_sale(
             )
             company = _OMINT
         elif slug == _INTER_ASSIST:
-            if data.quote is None:
+            if not isinstance(data.quote, InterAssistQuoteSnapshot):
                 raise SaleFlowError(400, "Inter Assist requiere el snapshot del viaje en `quote`")
             sale, created = open_inter_assist_sale(
                 session,
@@ -99,6 +108,17 @@ def create_sale(
                 data.quote,
             )
             company = _INTER_ASSIST
+        elif slug == _UNIVERSAL:
+            if not isinstance(data.quote, UniversalQuoteSnapshot):
+                raise SaleFlowError(400, "Universal requiere el snapshot del viaje en `quote`")
+            sale, created = open_universal_sale(
+                session,
+                current_user,
+                data.company,
+                data.quote_id,
+                data.quote,
+            )
+            company = _UNIVERSAL
         else:
             raise SaleFlowError(
                 400,
@@ -230,17 +250,19 @@ def download_sale_voucher_pdf(
     current_user: Annotated[User, Depends(get_current_user)],
     lang: Annotated[str, Query(pattern="^(es|en|pt)$")] = "es",
 ) -> Response:
-    """Proxy del PDF de Inter Assist. El front debe pedirlo con el JWT (no abrir la URL externa)."""
+    """Proxy del PDF. Inter Assist y Universal. El front lo pide con el JWT."""
     try:
         slug = _sale_company_slug(session, sale_id)
-        if slug != _INTER_ASSIST:
-            raise SaleFlowError(
-                400,
-                "La descarga de PDF por proxy solo aplica a Inter Assist",
+        if slug == _INTER_ASSIST:
+            content, filename = download_inter_assist_voucher_pdf(
+                session, current_user, sale_id, lang=lang
             )
-        content, filename = download_inter_assist_voucher_pdf(
-            session, current_user, sale_id, lang=lang
-        )
+        elif slug == _UNIVERSAL:
+            content, filename = download_universal_voucher_pdf(
+                session, current_user, sale_id, lang=lang
+            )
+        else:
+            raise SaleFlowError(400, "La descarga de PDF por proxy no aplica a esta compañía")
     except SaleFlowError as exc:
         raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
     return Response(
@@ -266,6 +288,8 @@ def set_passengers(
             return set_omint_passengers(session, current_user, sale_id, data)
         if slug == _INTER_ASSIST:
             return set_inter_assist_passengers(session, current_user, sale_id, data)
+        if slug == _UNIVERSAL:
+            return set_universal_passengers(session, current_user, sale_id, data)
         raise SaleFlowError(400, "La emisión para esta compañía todavía no está disponible")
     except SaleFlowError as exc:
         raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
@@ -278,13 +302,15 @@ def start_payment(
     session: Annotated[Session, Depends(get_session)],
     current_user: Annotated[User, Depends(get_current_user)],
 ) -> PaymentResponse:
-    """Abre el cobro. Omint usa su gateway; Inter Assist usa la pasarela simulada."""
+    """Abre el cobro. Omint usa su gateway; Inter Assist y Universal, la pasarela simulada."""
     try:
         slug = _sale_company_slug(session, sale_id)
         if slug == _OMINT:
             return start_omint_payment(session, current_user, sale_id, data)
         if slug == _INTER_ASSIST:
             return start_inter_assist_payment(session, current_user, sale_id, data)
+        if slug == _UNIVERSAL:
+            return start_universal_payment(session, current_user, sale_id, data)
         raise SaleFlowError(400, "La emisión para esta compañía todavía no está disponible")
     except SaleFlowError as exc:
         raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
@@ -297,12 +323,14 @@ def simulate_payment(
     session: Annotated[Session, Depends(get_session)],
     current_user: Annotated[User, Depends(get_current_user)],
 ) -> PaymentResponse:
-    """Solo Inter Assist: mueve el pago simulado a pending, approved o rejected."""
+    """Mueve el pago simulado de Inter Assist o Universal a pending, approved o rejected."""
     try:
         slug = _sale_company_slug(session, sale_id)
-        if slug != _INTER_ASSIST:
-            raise SaleFlowError(400, "La simulación de pago solo aplica a Inter Assist")
-        return simulate_inter_assist_payment(session, current_user, sale_id, data)
+        if slug == _INTER_ASSIST:
+            return simulate_inter_assist_payment(session, current_user, sale_id, data)
+        if slug == _UNIVERSAL:
+            return simulate_universal_payment(session, current_user, sale_id, data)
+        raise SaleFlowError(400, "La simulación de pago no aplica a esta compañía")
     except SaleFlowError as exc:
         raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
 
@@ -313,13 +341,15 @@ def confirm_payment(
     session: Annotated[Session, Depends(get_session)],
     current_user: Annotated[User, Depends(get_current_user)],
 ) -> PaymentConfirmResponse:
-    """Confirma el pago. En Inter Assist, si está approved emite el voucher."""
+    """Confirma el pago. En Inter Assist y Universal, si está approved emite el voucher."""
     try:
         slug = _sale_company_slug(session, sale_id)
         if slug == _OMINT:
             return confirm_omint_payment(session, current_user, sale_id)
         if slug == _INTER_ASSIST:
             return confirm_inter_assist_payment(session, current_user, sale_id)
+        if slug == _UNIVERSAL:
+            return confirm_universal_payment(session, current_user, sale_id)
         raise SaleFlowError(400, "La emisión para esta compañía todavía no está disponible")
     except SaleFlowError as exc:
         raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc

@@ -49,6 +49,7 @@ def put_agency_credential(
     """Guarda la credencial de la agencia para esa compañía. Solo ADMIN.
 
     Cardinal: ``agente_emisor_guid`` y, si lo hay, ``agente_emisor_secreto``.
+    Universal: ``organizacion_emisora`` (RowId de Siebel).
     """
     try:
         return upsert_agency_credential(session, agency_id, company_slug, payload)
